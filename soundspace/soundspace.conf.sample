@@ -1,0 +1,9 @@
+{
+    /* "path" : "...", */
+    /* "script_path" : "", */
+    "listener" : {},
+    "sources" : [
+	{ "name" : "rightbip", "file" : "monobip.wav", "position" : [0,0,-1], "gain" : 1.0 },
+	{ "name" : "leftbip", "file" : "monobip.wav", "position" : [0,0,1], "gain" : 1.0 }
+    ],
+}
