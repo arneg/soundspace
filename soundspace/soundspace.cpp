@@ -123,9 +123,8 @@ public:
     */
 
     ~Buffer() {
-	throw("buffer should not be deleted");
 	std::cerr << "deleting buffer " << id << std::endl;
-	//alDeleteBuffers(1, &id);
+	alDeleteBuffers(1, &id);
     }
 
 };
