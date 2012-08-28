@@ -14,6 +14,7 @@ public:
 
     void add(const char * s);
     void add(const std::string & s);
+    void add(const unsigned int n);
     void reserve(size_t n);
 };
 

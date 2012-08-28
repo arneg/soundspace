@@ -1,6 +1,7 @@
 #include "json_builder.h"
 #include <cstdio>
 #include "string.h"
+#include <boost/lexical_cast.hpp>
 
 void JSONBuilder::put(std::string & s) { buf.append(s); }
 void JSONBuilder::put(const char * s) { buf.append(s); }
@@ -46,5 +47,10 @@ void JSONBuilder::add(const char * s) {
 void JSONBuilder::add(const std::string & s) {
     add(s.c_str(), s.size());
 }
+
+void JSONBuilder::add(const unsigned int n) {
+    buf += boost::lexical_cast<std::string>(n);
+}
+
 void JSONBuilder::reserve(size_t n) {
 }
