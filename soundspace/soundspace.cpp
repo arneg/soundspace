@@ -747,7 +747,7 @@ void setup() {
     Json::Value::ArrayIndex n;
     unsigned int i;
 
-    for (i = 0; i < sizeof(conf_names); i++) {
+    for (i = 0; i < sizeof(*conf_names); i++) {
 	std::cerr << "trying to open config file '" << conf_names[i] << "'" << std::endl;
 	cfile.open(conf_names[i]);
 	if (!cfile.fail()) {
