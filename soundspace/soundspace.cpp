@@ -740,6 +740,47 @@ static const char * conf_names[] = {
     "/opt/memopol/immigration/soundspace.conf"
 };
 
+
+Source * sourceFromFile(std::string & file, std::string & name) {
+    std::string path = sound_path + file;
+    Source * s = dev->getSource();
+    Buffer * buf = new Buffer(path);
+    s->add(buf);
+    dev->addName(name, s);
+    return s;
+}
+
+Source * sourceFromFile(std::string & file) {
+    return sourceFromFile(file, file);
+}
+
+#define CONFIG_SET(m, s, name)    do {				\
+	if ((m).isMember(#name)) (s)-> name ((m)[#name]);	\
+    } while (0)
+
+Source * sourceFromJSON(Json::Value & sinfo) {
+    Source * s = NULL;
+
+    if (sinfo.isMember("file")) {
+	std::string file = sinfo["file"].asString();
+	if (sinfo.isMember("name")) {
+	    std::string name = sinfo["name"].asString();
+	    s = sourceFromFile(file, name);
+	} else {
+	    s = sourceFromFile(file);
+	}
+	CONFIG_SET(sinfo, s, position);
+	CONFIG_SET(sinfo, s, velocity);
+	CONFIG_SET(sinfo, s, gain);
+	CONFIG_SET(sinfo, s, pitch);
+	CONFIG_SET(sinfo, s, loop);
+    } else {
+	std::cerr << "file location missing" << std::endl;
+    }
+
+    return NULL;
+}
+
 void setup() {
     std::ifstream cfile;
     Json::Reader r;
@@ -784,26 +825,7 @@ void setup() {
 
 	    for (i = 0; i < n; i++) {
 		Json::Value sinfo = v[i];
-		Source * s = dev->getSource();
-#define CONFIG_SET(m, s, name)    do {			\
-	if ((m).isMember(#name)) (s)-> name ((m)[#name]);	\
-    } while (0)
-		CONFIG_SET(sinfo, s, position);
-		CONFIG_SET(sinfo, s, velocity);
-		CONFIG_SET(sinfo, s, gain);
-		CONFIG_SET(sinfo, s, pitch);
-		CONFIG_SET(sinfo, s, loop);
-		if (sinfo.isMember("file")) {
-		    std::string file = sinfo["file"].asString();
-		    if (sinfo.isMember("name")) {
-			std::string name = sinfo["name"].asString();
-			dev->addName(name, s);
-		    } else 
-			dev->addName(file, s);
-		    file.insert(0, sound_path);
-		    Buffer * buf = new Buffer(file);
-		    s->add(buf);
-		}
+		sourceFromJSON(sinfo);
 	    }
 	} else shutdown(1, "no sources found");
 
@@ -843,6 +865,8 @@ void interpol_callback(Json::Value & root) {
 	    std::cerr << "script_path: " << script_path << std::endl;
 	    file.append(root["script"].asCString());
 	    comm.eval(file);
+	} else if (root["cmd"] == "add_source") {
+	    Source * s = sourceFromJSON(root);
 	} else if (root["cmd"] == "stop_audio") {
 	    dev->Stop(root["ids"]);
 	} else if (root["cmd"] == "reset_audio") {
