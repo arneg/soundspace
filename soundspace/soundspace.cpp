@@ -8,6 +8,11 @@
 #include <unistd.h>
 #include <list>
 #include <cmath>
+#include <sys/mman.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <cstring>
 
 #include <AL/al.h>
 #include <AL/alc.h>
@@ -17,20 +22,6 @@ void interpol_callback(Json::Value&);
 
 Interpol comm = Interpol("soundspace", interpol_callback);
 Json::Value config;
-
-__attribute__((noreturn))
-void shutdown(int code) {
-    std::cerr << "disconnected" << std::endl;
-    std::cerr.flush();
-    comm.send_error("shutdown");
-    exit(code);
-}
-
-__attribute__((noreturn))
-void shutdown(int code, const char * s) {
-    std::cerr << "shutdown for REASON: " << s << std::endl;
-    shutdown(code);
-}
 
 static inline void checkError() {
     ALenum err = alGetError();
@@ -74,12 +65,18 @@ static inline void Json2AL(Json::Value & v, bool & b) {
 class Buffer {
 public:
     ALuint id;
+#ifndef ALUT
+    void * data;
+    int fd;
+    struct stat st;
+#endif
 
     Buffer() {
 	alGenBuffers(1, &id);
     }
 
     void fromFile(const char * f) {
+#ifdef ALUT
 	ALint channels = 1;
 	id = alutCreateBufferFromFile(f);
 	if (id == AL_NONE) {
@@ -91,6 +88,106 @@ public:
 	    std::cerr << "Warning: '" << f << "' contains stereo data and"
 			 " will be played without spatialization." << std::endl;
 	}
+#else
+
+	fd = open(f, O_RDONLY);
+
+	if (fd == -1)
+	    throw("could not open file");
+
+	if (fstat(fd, &st) == -1)
+	    throw("could not stat file");
+
+	if (!S_ISREG (st.st_mode))
+	    throw("not a regular file");
+
+#ifdef TESTING
+	std::cerr << "open file " << f << " with size " << st.st_size << std::endl;
+#endif
+
+	data = mmap(0, st.st_size, PROT_READ, MAP_SHARED, fd, 0);
+
+	if (data == MAP_FAILED) {
+	    close(fd);
+	    throw("mmap failed");
+	}
+
+	madvise(data, st.st_size, MADV_SEQUENTIAL);
+
+	{
+	    struct riff_header {
+		char riff[4];
+		unsigned int length;
+		char wave[4];
+	    };
+	    struct wave_format {
+		char fmt[4];
+		unsigned int len;
+		unsigned short tag;
+		unsigned short channels;
+		unsigned int sample_rate;
+		unsigned int bytes_per_second;
+		unsigned short align;
+		unsigned short bits_per_sample;
+	    };
+	    struct pcm_header {
+		char data[4];
+		unsigned int length;
+	    };
+	    const struct riff_header * rhead;
+	    const struct wave_format * whead;
+	    const struct pcm_header * phead;
+	    const char * buf = (const char *) data;
+	    ALenum format;
+	    ALuint frequency;
+	    const int HEADER_SIZE = sizeof(struct riff_header) + sizeof(struct wave_format)
+				    + sizeof(struct pcm_header);
+
+	    if (st.st_size < HEADER_SIZE) {
+		throw("muha");
+	    }
+
+	    rhead = (const struct riff_header*)buf;
+	    buf += sizeof(struct riff_header);
+	    whead = (const struct wave_format*)buf;
+	    buf += sizeof(struct wave_format);
+	    phead = (const struct pcm_header*)buf;
+	    buf += sizeof(struct pcm_header);
+
+	    if (strncmp(rhead->riff, "RIFF", 4) || strncmp(rhead->wave, "WAVE", 4)) {
+		throw("bad riff wave header");
+	    }
+
+	    if (rhead->length + 8 != st.st_size)
+		throw("someone is lying about the size of this wave");
+
+	    if (strncmp(whead->fmt, "fmt ", 4) || whead->len != 16)
+		throw("bad wave format");
+
+#ifdef TESTING
+	    std::cerr << "bits: " << whead->bits_per_sample
+		      << ", channels: " << whead->channels << std::endl;
+#endif
+	    if (whead->channels == 1) {
+		format = (whead->bits_per_sample == 8) ? AL_FORMAT_MONO8 : AL_FORMAT_MONO16;
+	    } else if (whead->channels == 2) {
+		std::cerr << "Warning: '" << f << "' contains stereo data and"
+			     " will be played without spatialization." << std::endl;
+		format = (whead->bits_per_sample == 8) ? AL_FORMAT_STEREO8 : AL_FORMAT_STEREO16;
+	    } else throw("bad number of channels");
+
+	    frequency = (ALuint)whead->sample_rate;
+
+	    if (strncmp(phead->data, "data", 4))
+		throw("bad pcm header");
+
+	    alGenBuffers(1, &id);
+#ifdef TESTING
+	    std::cerr << "generated buffer " << id << std::endl;
+#endif
+	    alBufferData(id, format, buf, st.st_size - HEADER_SIZE, frequency);
+	}
+#endif
     }
 
     Buffer(const char * f) {
@@ -125,6 +222,10 @@ public:
     ~Buffer() {
 	std::cerr << "deleting buffer " << id << std::endl;
 	alDeleteBuffers(1, &id);
+#ifndef ALUT
+	munmap(data, st.st_size);
+	close(fd);
+#endif
     }
 
 };
@@ -227,6 +328,7 @@ public:
     Buffer * buffer;
     Device * dev;
     ALuint id;
+    bool is_copy;
 
 #define FUN(name, FLAG)	typeof(name ## _value) name () {		    \
 	get(FLAG, name ## _value);					    \
@@ -326,8 +428,21 @@ public:
     SOURCE_ACTION(Stop);
     SOURCE_ACTION(Rewind);
 
+    Source(Device * _dev) : dev(_dev) {
+	is_copy = false;
+	buffer = NULL;
+	alGenSources(1, &id);
+#ifdef TESTING
+	std::cerr << "created source " << id << std::endl;
+#endif
+    }
+
     Source(Device * _dev, ALuint _id, Buffer * _buffer = NULL) : buffer(_buffer), dev(_dev), id(_id) {
+#ifdef TESTING
+	std::cerr << "copied source " << id << std::endl;
+#endif
 	update();
+	is_copy = true;
 #if 0
 	position(0.0, 0.0, 0.0);
 	velocity(0.0, 0.0, 0.0);
@@ -337,14 +452,26 @@ public:
 	pitch(1.0f);
 	loop(false);
 #endif
-#if 1
-	std::cerr << "created source " << id << std::endl;
-#endif
     }
 
     Source * copy() {
 	Source * t = new Source(dev, id, buffer);
 	return t;
+    }
+    
+    ~Source() {
+	Stop();
+	if (!is_copy) {
+	    delete(buffer);
+	    alDeleteSources(1, &id);
+#ifdef TESTING
+	    std::cerr << "deleted source " << id << std::endl;
+#endif
+	} else {
+#ifdef TESTING
+	    std::cerr << "deleted copied source " << id << std::endl;
+#endif
+	}
     }
 
 };
@@ -518,6 +645,10 @@ public:
     std::map<std::string,Source*> name2source;
     Listener l;
     Animator animator;
+#ifndef ALUT
+    ALCdevice * dev;
+    ALCcontext * ctx;
+#endif
 
     Device() {
 #if 0
@@ -527,8 +658,20 @@ public:
 	}
 	Device(alcGetString(NULL, ALC_DEVICE_SPECIFIER));
 #endif
+#ifdef ALUT
 	// fake and cheap
 	alutInit(0, NULL);
+#else
+	dev = alcOpenDevice(NULL);
+	if (!dev) {
+	    throw("foo");
+	}
+	ctx = alcCreateContext(dev, NULL);
+	if (!ctx) {
+	    throw("bar");
+	}
+	alcMakeContextCurrent(ctx);
+#endif
     }
 
     Device(const ALCchar * name) {
@@ -572,10 +715,7 @@ public:
     }
 
     Source * getSource() {
-	ALuint id;
-	Source * source;
-	alGenSources(1, &id);
-	source = new Source(this, id);
+	Source * source = new Source(this);
 	sources.push_back(source);
 	return source;
     }
@@ -599,6 +739,43 @@ public:
 	    return getSource(s);
 	} else
 	    throw("Bad argument 1 to getSource(). Expected uint or string.");
+    }
+
+    void removeSource(Json::Value & ids) {
+	std::vector<Source*> a;
+	Ids2Sources(ids, a);
+	std::vector<Source*>::iterator it1;
+
+	for (it1 = a.begin(); it1 != a.end(); it1++) {
+	    ALuint id = (*it1)->id;
+	    std::vector<Source*>::reverse_iterator it2;
+
+	    for (it2 = snapshot.rbegin(); it2 != snapshot.rend(); it2++) {
+
+		if ((*it2)->id == id) {
+		    delete(*it2);
+		    snapshot.erase(--it2.base());
+		    break;
+		}
+	    }
+
+	    for (it2 = sources.rbegin(); it2 != sources.rend(); it2++) {
+		if ((*it2)->id == id) {
+		    delete(*it2);
+		    sources.erase(--it2.base());
+		    break;
+		}
+	    }
+
+	    std::map<std::string,Source*>::iterator it;
+
+	    for (it = name2source.begin(); it != name2source.end(); it++) {
+		if (it->second == *it1) {
+		    name2source.erase(it);
+		    break;
+		}
+	    }
+	}
     }
 
     void checkSource(size_t id) throw(const char *) {
@@ -719,13 +896,25 @@ typedef ALfloat ALfv[3];
 
 
     ~Device() {
-	for (size_t i = 0; i < sources.size(); i++) {
-	    delete (sources[i]);
+	std::vector<Source*>::iterator it;
+
+	for (it = snapshot.begin(); it != snapshot.end(); it++) {
+	    delete(*it);
 	}
+	for (it = sources.begin(); it != sources.end(); it++) {
+	    delete(*it);
+	}
+#ifdef ALUT
+	alutExit();
+#else
+	alcMakeContextCurrent(NULL);
+	alcDestroyContext(ctx);
+	alcCloseDevice(dev);
+#endif
     }
 };
 
-Device * dev;
+Device * dev = NULL;
 
 std::string sound_path, script_path;
 
@@ -778,7 +967,22 @@ Source * sourceFromJSON(Json::Value & sinfo) {
 	std::cerr << "file location missing" << std::endl;
     }
 
-    return NULL;
+    return s;
+}
+
+__attribute__((noreturn))
+void shutdown(int code) {
+    std::cerr << "disconnected" << std::endl;
+    std::cerr.flush();
+    comm.send_error("shutdown");
+    if (dev) delete(dev);
+    exit(code);
+}
+
+__attribute__((noreturn))
+void shutdown(int code, const char * s) {
+    std::cerr << "shutdown for REASON: " << s << std::endl;
+    shutdown(code);
 }
 
 void setup() {
@@ -867,6 +1071,9 @@ void interpol_callback(Json::Value & root) {
 	    comm.eval(file);
 	} else if (root["cmd"] == "add_source") {
 	    Source * s = sourceFromJSON(root);
+	    if (s) dev->snapshot.push_back(s->copy());
+	} else if (root["cmd"] == "remove_source") {
+	    dev->removeSource(root["ids"]);
 	} else if (root["cmd"] == "stop_audio") {
 	    dev->Stop(root["ids"]);
 	} else if (root["cmd"] == "reset_audio") {
