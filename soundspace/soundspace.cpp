@@ -16,7 +16,6 @@
 
 #include <AL/al.h>
 #include <AL/alc.h>
-#include <AL/alut.h>
 
 void interpol_callback(Json::Value&);
 
@@ -62,173 +61,8 @@ static inline void Json2AL(Json::Value & v, bool & b) {
     b = (ALfloat)v.asBool();
 }
 
-class Buffer {
-public:
-    ALuint id;
-#ifndef ALUT
-    void * data;
-    int fd;
-    struct stat st;
-#endif
-
-    Buffer() {
-	alGenBuffers(1, &id);
-    }
-
-    void fromFile(const char * f) {
-#ifdef ALUT
-	ALint channels = 1;
-	id = alutCreateBufferFromFile(f);
-	if (id == AL_NONE) {
-	    std::cerr << "could not load file " << f << std::endl;
-	    throw("loading file failed.");
-	}
-	alGetBufferi(id, AL_CHANNELS, &channels);
-	if (channels > 1) {
-	    std::cerr << "Warning: '" << f << "' contains stereo data and"
-			 " will be played without spatialization." << std::endl;
-	}
-#else
-
-	fd = open(f, O_RDONLY);
-
-	if (fd == -1)
-	    throw("could not open file");
-
-	if (fstat(fd, &st) == -1)
-	    throw("could not stat file");
-
-	if (!S_ISREG (st.st_mode))
-	    throw("not a regular file");
-
-#ifdef TESTING
-	std::cerr << "open file " << f << " with size " << st.st_size << std::endl;
-#endif
-
-	data = mmap(0, st.st_size, PROT_READ, MAP_SHARED, fd, 0);
-
-	if (data == MAP_FAILED) {
-	    close(fd);
-	    throw("mmap failed");
-	}
-
-	madvise(data, st.st_size, MADV_SEQUENTIAL);
-
-	{
-	    struct riff_header {
-		char riff[4];
-		unsigned int length;
-		char wave[4];
-	    };
-	    struct wave_format {
-		char fmt[4];
-		unsigned int len;
-		unsigned short tag;
-		unsigned short channels;
-		unsigned int sample_rate;
-		unsigned int bytes_per_second;
-		unsigned short align;
-		unsigned short bits_per_sample;
-	    };
-	    struct pcm_header {
-		char data[4];
-		unsigned int length;
-	    };
-	    const struct riff_header * rhead;
-	    const struct wave_format * whead;
-	    const struct pcm_header * phead;
-	    const char * buf = (const char *) data;
-	    ALenum format;
-	    ALuint frequency;
-	    const int HEADER_SIZE = sizeof(struct riff_header) + sizeof(struct wave_format)
-				    + sizeof(struct pcm_header);
-
-	    if (st.st_size < HEADER_SIZE) {
-		throw("muha");
-	    }
-
-	    rhead = (const struct riff_header*)buf;
-	    buf += sizeof(struct riff_header);
-	    whead = (const struct wave_format*)buf;
-	    buf += sizeof(struct wave_format);
-	    phead = (const struct pcm_header*)buf;
-	    buf += sizeof(struct pcm_header);
-
-	    if (strncmp(rhead->riff, "RIFF", 4) || strncmp(rhead->wave, "WAVE", 4)) {
-		throw("bad riff wave header");
-	    }
-
-	    if (rhead->length + 8 != st.st_size)
-		throw("someone is lying about the size of this wave");
-
-	    if (strncmp(whead->fmt, "fmt ", 4) || whead->len != 16)
-		throw("bad wave format");
-
-#ifdef TESTING
-	    std::cerr << "bits: " << whead->bits_per_sample
-		      << ", channels: " << whead->channels << std::endl;
-#endif
-	    if (whead->channels == 1) {
-		format = (whead->bits_per_sample == 8) ? AL_FORMAT_MONO8 : AL_FORMAT_MONO16;
-	    } else if (whead->channels == 2) {
-		std::cerr << "Warning: '" << f << "' contains stereo data and"
-			     " will be played without spatialization." << std::endl;
-		format = (whead->bits_per_sample == 8) ? AL_FORMAT_STEREO8 : AL_FORMAT_STEREO16;
-	    } else throw("bad number of channels");
-
-	    frequency = (ALuint)whead->sample_rate;
-
-	    if (strncmp(phead->data, "data", 4))
-		throw("bad pcm header");
-
-	    alGenBuffers(1, &id);
-#ifdef TESTING
-	    std::cerr << "generated buffer " << id << std::endl;
-#endif
-	    alBufferData(id, format, buf, st.st_size - HEADER_SIZE, frequency);
-	}
-#endif
-    }
-
-    Buffer(const char * f) {
-	fromFile(f);
-    }
-
-    Buffer(std::string & file) {
-	fromFile(file.c_str());
-    }
-
-    Buffer(Json::Value & s) {
-	if (!s.isString())
-	    throw("Bad argument one to Buffer(). Expected string.");
-	fromFile(s.asCString());
-    }
-
-    /*
-    void add_data(const char * file) {
-	ALenum format;
-	ALvoid * data;
-	ALsizei size, freq;
-	ALboolean succ;
-	alutLoadWAVFile((ALbyte*)file,&format,&data,&size,&freq,&succ);
-	if (format != AL_FORMAT_MONO8 && format != AL_FORMAT_MONO16) {
-
-	}
-	alBufferData(id,format,data,size,freq);
-	alutUnloadWAV(format,data,size,freq);
-    }
-    */
-
-    ~Buffer() {
-	std::cerr << "deleting buffer " << id << std::endl;
-	alDeleteBuffers(1, &id);
-#ifndef ALUT
-	munmap(data, st.st_size);
-	close(fd);
-#endif
-    }
-
-};
+const int NBUFFERS = 2;
+const int BUFFER_INTERVAL = 1000;
 
 class Listener {
 public:
@@ -281,8 +115,208 @@ public:
 
 // forward definition
 class Device;
+class Buffer;
+class Source;
 
-class Source {
+class Buffer {
+    struct riff_header {
+	char riff[4];
+	unsigned int length;
+	char wave[4];
+    };
+    struct wave_format {
+	char fmt[4];
+	unsigned int len;
+	unsigned short tag;
+	unsigned short channels;
+	unsigned int sample_rate;
+	unsigned int bytes_per_second;
+	unsigned short align;
+	unsigned short bits_per_sample;
+    };
+    struct pcm_header {
+	char data[4];
+	unsigned int length;
+    };
+#define HEADER_SIZE (long)(sizeof(struct riff_header) + sizeof(struct wave_format) + sizeof(struct pcm_header))
+public:
+    ALuint id[NBUFFERS];
+    void * data;
+    int fd;
+    struct stat st;
+    size_t offset;
+    size_t chunk_size;
+    ALenum format;
+    ALuint frequency;
+    unsigned long interval;
+
+    Buffer() {
+	data = NULL;
+	fd = -1;
+	alGenBuffers(NBUFFERS, id);
+    }
+
+    void fromFile(const char * f) {
+	data = NULL;
+
+	fd = open(f, O_RDONLY);
+
+	if (fd == -1)
+	    throw("could not open file");
+
+	if (fstat(fd, &st) == -1)
+	    throw("could not stat file");
+
+	if (!S_ISREG (st.st_mode))
+	    throw("not a regular file");
+
+#ifdef TESTING
+	std::cerr << "open file " << f << " with size " << st.st_size << std::endl;
+#endif
+
+	data = mmap(0, st.st_size, PROT_READ, MAP_SHARED, fd, 0);
+
+#ifdef TESTING
+	std::cerr << "mapped " << f << " to " << data << std::endl;
+#endif
+
+	if (data == MAP_FAILED) {
+	    close(fd);
+	    throw("mmap failed");
+	}
+
+	madvise(data, st.st_size, MADV_SEQUENTIAL);
+
+	{
+	    const struct riff_header * rhead;
+	    const struct wave_format * whead;
+	    const struct pcm_header * phead;
+	    const char * buf = (const char *) data;
+
+	    if (st.st_size < HEADER_SIZE) {
+		throw("muha");
+	    }
+
+	    rhead = (const struct riff_header*)buf;
+	    buf += sizeof(struct riff_header);
+	    whead = (const struct wave_format*)buf;
+	    buf += sizeof(struct wave_format);
+	    phead = (const struct pcm_header*)buf;
+	    buf += sizeof(struct pcm_header);
+
+	    if (strncmp(rhead->riff, "RIFF", 4) || strncmp(rhead->wave, "WAVE", 4)) {
+		throw("bad riff wave header");
+	    }
+
+	    if (rhead->length + 8 != st.st_size)
+		throw("someone is lying about the size of this wave");
+
+	    if (strncmp(whead->fmt, "fmt ", 4) || whead->len != 16)
+		throw("bad wave format");
+
+#ifdef TESTING
+	    std::cerr << "bits: " << whead->bits_per_sample
+		      << ", channels: " << whead->channels << std::endl;
+#endif
+	    if (whead->channels == 1) {
+		format = (whead->bits_per_sample == 8) ? AL_FORMAT_MONO8 : AL_FORMAT_MONO16;
+	    } else if (whead->channels == 2) {
+		std::cerr << "Warning: '" << f << "' contains stereo data and"
+			     " will be played without spatialization." << std::endl;
+		format = (whead->bits_per_sample == 8) ? AL_FORMAT_STEREO8 : AL_FORMAT_STEREO16;
+	    } else throw("bad number of channels");
+
+	    frequency = (ALuint)whead->sample_rate;
+
+	    if (strncmp(phead->data, "data", 4))
+		throw("bad pcm header");
+
+	    offset = HEADER_SIZE;
+	    chunk_size = whead->bytes_per_second / 1000 * BUFFER_INTERVAL;
+	    interval = BUFFER_INTERVAL/2;
+
+	    chunk_size |= chunk_size >> 1;
+	    chunk_size |= chunk_size >> 2;
+	    chunk_size |= chunk_size >> 4;
+	    chunk_size |= chunk_size >> 8;
+	    chunk_size |= chunk_size >> 16;
+	    chunk_size |= chunk_size >> 32;
+	    chunk_size += 1;
+
+	    if (2*chunk_size > (st.st_size - HEADER_SIZE)) {
+		chunk_size = (st.st_size - HEADER_SIZE) / 2;
+		interval = chunk_size * 1000 / whead->bytes_per_second;
+		interval /= 2;
+	    }
+
+#ifdef TESTING
+	    std::cerr << "buffering chunks of " << chunk_size << " bytes" << std::endl;
+	    std::cerr << "using interval of " << interval << " ms" << std::endl;
+#endif
+	}
+	alGenBuffers(NBUFFERS, id);
+#ifdef TESTING
+	std::cerr << "generated " << NBUFFERS << " buffer " << *id << std::endl;
+#endif
+    }
+
+    void * buf() {
+	return (char*)data + offset;
+    }
+
+    const size_t left() {
+	return st.st_size - offset;
+    }
+
+    void reset() {
+	offset = HEADER_SIZE;
+    }
+
+    int feed_one(Source & source, ALuint buffer, size_t len);
+    int feed_start(Source & source);
+    int feed_more(Source & source);
+
+    Buffer(const char * f) {
+	fromFile(f);
+    }
+
+    Buffer(std::string & file) {
+	fromFile(file.c_str());
+    }
+
+    Buffer(Json::Value & s) {
+	if (!s.isString())
+	    throw("Bad argument one to Buffer(). Expected string.");
+	fromFile(s.asCString());
+    }
+
+    /*
+    void add_data(const char * file) {
+	ALenum format;
+	ALvoid * data;
+	ALsizei size, freq;
+	ALboolean succ;
+	alutLoadWAVFile((ALbyte*)file,&format,&data,&size,&freq,&succ);
+	if (format != AL_FORMAT_MONO8 && format != AL_FORMAT_MONO16) {
+
+	}
+	alBufferData(id,format,data,size,freq);
+	alutUnloadWAV(format,data,size,freq);
+    }
+    */
+
+    ~Buffer() {
+#ifdef TESTING
+	std::cerr << "deleting buffer " << id << " with data " << data << std::endl;
+#endif
+	alDeleteBuffers(NBUFFERS, id);
+	munmap(data, st.st_size);
+	close(fd);
+    }
+
+};
+
+class SourceSettings {
     void get(ALenum pname, ALint & i) {
 	alGetSourcei(id, pname, & i);
 	checkError();
@@ -323,13 +357,8 @@ class Source {
 	get(pname, i);
 	b = (i == AL_TRUE);
     }
-
 public:
-    Buffer * buffer;
-    Device * dev;
     ALuint id;
-    bool is_copy;
-
 #define FUN(name, FLAG)	typeof(name ## _value) name () {		    \
 	get(FLAG, name ## _value);					    \
 	return name ## _value;						    \
@@ -384,8 +413,22 @@ public:
     fFUN(gain, AL_GAIN);
     fFUN(min_gain, AL_MIN_GAIN);
     fFUN(max_gain, AL_MAX_GAIN);
-    bFUN(loop, AL_LOOPING);
     iFUN(state, AL_SOURCE_STATE);
+    iFUN(buffers_processed, AL_BUFFERS_PROCESSED);
+
+    SourceSettings() {}
+    SourceSettings(ALuint _id) : id(_id) {
+	update();
+#ifdef TESTING
+	std::cerr << "copied source " << id << std::endl;
+#endif
+    }
+
+    ~SourceSettings() {
+#ifdef TESTING
+	std::cerr << "deleted copied source " << id << std::endl;
+#endif
+    }
 
     void update() {
 	position();
@@ -394,7 +437,6 @@ public:
 	gain();
 	min_gain();
 	max_gain();
-	loop();
     }
 
     void apply() {
@@ -404,7 +446,28 @@ public:
 	gain(gain_value);
 	min_gain(min_gain_value);
 	max_gain(max_gain_value);
-	loop(loop_value);
+    }
+};
+
+class Source : public SourceSettings {
+    struct event timer_ev;
+public:
+    Buffer * buffer;
+    Device * dev;
+    bool is_copy;
+
+    bool _loop;
+    bool loop() {
+	return _loop;
+    }
+
+    bool loop(bool v) {
+	return _loop = v;
+    }
+
+    bool loop(Json::Value & v) {
+	Json2AL(v, _loop);
+	return _loop;
     }
 
     void add(Buffer * buf) {
@@ -417,64 +480,151 @@ public:
 #if 0
 	std::cerr << "adding buffer " << buf->id << std::endl;
 #endif
-	alSourcei(id, AL_BUFFER, buf->id);
     }
 
-#define SOURCE_ACTION(name) void name () {		    \
-	alSource ## name(id);				    \
+    bool paused;
+
+    void Play() {
+	if (paused) {
+	    paused = false;
+	    timer_continue();
+	} else timer_start();
+	alSourcePlay(id);
     }
-    SOURCE_ACTION(Play);
-    SOURCE_ACTION(Pause);
-    SOURCE_ACTION(Stop);
-    SOURCE_ACTION(Rewind);
+
+    void Stop() {
+	timer_stop();
+	buffer->reset();
+	alSourceStop(id);
+	paused = false;
+
+	ALuint num = buffers_processed();
+
+	while (num--) unqueue_buffer();
+    }
+
+    void Rewind() {
+	// TODO: this is certainly broken
+	buffer->reset();
+	alSourceRewind(id);
+	paused = false;
+    }
+
+    void Pause() {
+	paused = true;
+	timer_stop();
+	alSourcePause(id);
+    }
 
     Source(Device * _dev) : dev(_dev) {
-	is_copy = false;
 	buffer = NULL;
+	paused = false;
+	timer_set = false;
 	alGenSources(1, &id);
+	evtimer_set(&timer_ev, timer_callback, this);
 #ifdef TESTING
 	std::cerr << "created source " << id << std::endl;
 #endif
-    }
-
-    Source(Device * _dev, ALuint _id, Buffer * _buffer = NULL) : buffer(_buffer), dev(_dev), id(_id) {
-#ifdef TESTING
-	std::cerr << "copied source " << id << std::endl;
-#endif
 	update();
-	is_copy = true;
-#if 0
-	position(0.0, 0.0, 0.0);
-	velocity(0.0, 0.0, 0.0);
-	min_gain(0.0f);
-	max_gain(1.0f);
-	gain(1.0f);
-	pitch(1.0f);
-	loop(false);
-#endif
     }
 
-    Source * copy() {
-	Source * t = new Source(dev, id, buffer);
+    SourceSettings * copy() {
+	SourceSettings * t = new SourceSettings(id);
 	return t;
     }
     
     ~Source() {
+#ifdef TESTING
+	std::cerr << ">> deletint source " << id << std::endl;
+#endif
 	Stop();
-	if (!is_copy) {
-	    delete(buffer);
-	    alDeleteSources(1, &id);
+	delete(buffer);
+	alDeleteSources(1, &id);
 #ifdef TESTING
-	    std::cerr << "deleted source " << id << std::endl;
+	std::cerr << "<< deleted source " << id << std::endl;
 #endif
-	} else {
-#ifdef TESTING
-	    std::cerr << "deleted copied source " << id << std::endl;
-#endif
+    }
+
+    void enqueue_buffer(ALuint buf_id) {
+	alSourceQueueBuffers(id, 1, &buf_id);
+    }
+
+    ALuint unqueue_buffer() {
+	ALuint buf_id;
+	alSourceUnqueueBuffers(id, 1, &buf_id);
+	return buf_id;
+    }
+
+    bool timer_set;
+
+    void timer_continue() {
+	const struct timeval sound_interval = { 0, buffer->interval*1000 };
+	if (!timer_set) {
+	    evtimer_add(&timer_ev, &sound_interval);
+	    timer_set = true;
+	}
+    }
+
+    void timer_start() {
+	if (buffer->feed_start(*this))
+	    timer_continue();
+    }
+
+    void timer_stop() {
+	if (timer_set) {
+	    evtimer_del(&timer_ev);
+	    timer_set = false;
+	}
+    }
+
+    void run() {
+	timer_set = false;
+	if (buffer->feed_more(*this)) {
+	    timer_continue();
+	}
+    }
+
+    static void timer_callback(int, short int, void * o) {
+	try {
+	    ((Source*)o)->run();
+	} catch (const char * s) {
+	    std::cerr << "error: " << s << std::endl;
+	} catch (...) {
+	    std::cerr << "some error" << std::endl;
 	}
     }
 
 };
+
+int Buffer::feed_one(Source & source, ALuint buffer, size_t len) {
+
+    if (!left()) return 0;
+
+    if (left() < len) len = left();
+
+    alBufferData(buffer, format, buf(), len, frequency);
+    offset += len;
+
+    source.enqueue_buffer(buffer);
+
+    return 1;
+}
+
+int Buffer::feed_start(Source & source) {
+    feed_one(source, id[0], chunk_size);
+    if (!left() && source.loop()) reset();
+    return feed_one(source, id[1], chunk_size);
+}
+
+int Buffer::feed_more(Source & source) {
+    ALuint num = source.buffers_processed();
+    while (num--) {
+	if (!left() && source.loop()) reset();
+	if (!feed_one(source, source.unqueue_buffer(), chunk_size)) return 0;
+    }
+
+    return 1;
+}
 
 class Animation {
 public:
@@ -589,16 +739,16 @@ public:
     }
 };
 
-// animation interval is 50 ms
-static const struct timeval soundtimer_t = { 0, 20*1000 };
-struct event timer_ev;
+const struct timeval animation_interval = { 0, 20*1000 };
 class Animator {
+    // animation interval is 20 ms
+    struct event timer_ev;
     std::list<Animation*> l;
 
 public:
     void add(Animation * a) {
 	if (l.size() == 0) {
-	    evtimer_add(&timer_ev, &soundtimer_t);
+	    evtimer_add(&timer_ev, &animation_interval);
 	}
 	l.push_back(a);
     }
@@ -619,7 +769,7 @@ public:
 	l.remove_if(is_done);
 
 	if (l.size()) {
-	    evtimer_add(&timer_ev, &soundtimer_t);
+	    evtimer_add(&timer_ev, &animation_interval);
 	}
     }
 
@@ -641,27 +791,15 @@ public:
 
 class Device {
 public:
-    std::vector<Source*> sources, snapshot;
+    std::vector<Source*> sources;
+    std::vector<SourceSettings*> snapshot;
     std::map<std::string,Source*> name2source;
     Listener l;
     Animator animator;
-#ifndef ALUT
     ALCdevice * dev;
     ALCcontext * ctx;
-#endif
 
     Device() {
-#if 0
-	if (alIsExtensionPresent("ALC_ENUMERATION_EXT") == AL_FALSE) {
-	    std::cerr << "enumeration extension is missin???" << std::endl;
-	    return;
-	}
-	Device(alcGetString(NULL, ALC_DEVICE_SPECIFIER));
-#endif
-#ifdef ALUT
-	// fake and cheap
-	alutInit(0, NULL);
-#else
 	dev = alcOpenDevice(NULL);
 	if (!dev) {
 	    throw("foo");
@@ -671,12 +809,6 @@ public:
 	    throw("bar");
 	}
 	alcMakeContextCurrent(ctx);
-#endif
-    }
-
-    Device(const ALCchar * name) {
-	//device = alcOpenDevice(name);
-	//std::cerr << "opened device " << name << std::endl;
     }
 
     void addName(std::string name, Source * s) {
@@ -748,7 +880,8 @@ public:
 
 	for (it1 = a.begin(); it1 != a.end(); it1++) {
 	    ALuint id = (*it1)->id;
-	    std::vector<Source*>::reverse_iterator it2;
+	    std::vector<SourceSettings*>::reverse_iterator it2;
+	    std::vector<Source*>::reverse_iterator it3;
 
 	    for (it2 = snapshot.rbegin(); it2 != snapshot.rend(); it2++) {
 
@@ -759,10 +892,10 @@ public:
 		}
 	    }
 
-	    for (it2 = sources.rbegin(); it2 != sources.rend(); it2++) {
-		if ((*it2)->id == id) {
-		    delete(*it2);
-		    sources.erase(--it2.base());
+	    for (it3 = sources.rbegin(); it3 != sources.rend(); it3++) {
+		if ((*it3)->id == id) {
+		    delete(*it3);
+		    sources.erase(--it3.base());
 		    break;
 		}
 	    }
@@ -817,10 +950,13 @@ public:
 
 #define DEVICE_ACTION(name) void name (Json::Value & ids)		\
     {									\
-	std::vector<ALuint> a;						\
-	Json2Ids(ids, a);						\
+	std::vector<Source*> a;						\
+	std::vector<Source*>::iterator it;				\
+	Ids2Sources(ids, a);						\
 									\
-	alSource ## name ## v(a.size(), &(a[0]));			\
+	for (it = a.begin(); it != a.end(); it++) {			\
+	    (*it)->name();						\
+	}								\
     }
     DEVICE_ACTION(Play)
     DEVICE_ACTION(Pause)
@@ -841,8 +977,8 @@ public:
 	}								\
     }
 
-// dont use this anywhere!
-typedef ALfloat ALfv[3];
+    // dont use this anywhere!
+    typedef ALfloat ALfv[3];
 
     FUN(gain, ALfloat)
     FUN(pitch, ALfloat)
@@ -896,21 +1032,20 @@ typedef ALfloat ALfv[3];
 
 
     ~Device() {
-	std::vector<Source*>::iterator it;
+	std::vector<SourceSettings*>::iterator it1;
+	std::vector<Source*>::iterator it2;
 
-	for (it = snapshot.begin(); it != snapshot.end(); it++) {
-	    delete(*it);
+	for (it1 = snapshot.begin(); it1 != snapshot.end(); it1++) {
+	    delete(*it1);
 	}
-	for (it = sources.begin(); it != sources.end(); it++) {
-	    delete(*it);
+	for (it2 = sources.begin(); it2 != sources.end(); it2++) {
+	    delete(*it2);
 	}
-#ifdef ALUT
-	alutExit();
-#else
 	alcMakeContextCurrent(NULL);
 	alcDestroyContext(ctx);
-	alcCloseDevice(dev);
-#endif
+	if (alcCloseDevice(dev) != ALC_TRUE) {
+	    std::cerr << "could not close device" << std::endl;
+	}
     }
 };
 
@@ -972,10 +1107,12 @@ Source * sourceFromJSON(Json::Value & sinfo) {
 
 __attribute__((noreturn))
 void shutdown(int code) {
-    std::cerr << "disconnected" << std::endl;
-    std::cerr.flush();
     comm.send_error("shutdown");
-    if (dev) delete(dev);
+    try {
+	if (dev) delete(dev);
+    } catch (const char * s) {
+	std::cerr << "error: " << s << std::endl;
+    }
     exit(code);
 }
 
@@ -1121,13 +1258,10 @@ void interpol_callback(Json::Value & root) {
 int main(int argc, char ** argv) {
     struct event ev;
 
-    std::cerr << "Init()"<<std::endl;
     event_init();
 #ifdef TESTING
     comm.seperator = '\n';
 #endif
-
-    alutInit(&argc, argv);
 
     dev = new Device();
 
@@ -1143,7 +1277,6 @@ int main(int argc, char ** argv) {
 
     event_set(&ev, 0, EV_READ | EV_PERSIST, comm.read_cb, &comm);
     event_add(&ev, NULL);
-    std::cerr << "dispatching" << std::endl;
     event_dispatch();
     return 0;
 }
