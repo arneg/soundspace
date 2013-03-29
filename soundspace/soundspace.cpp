@@ -1170,7 +1170,9 @@ void setup() {
 		Json::Value sinfo = v[i];
 		sourceFromJSON(sinfo);
 	    }
-	} else shutdown(1, "no sources found");
+	} else {
+	    std::cerr << "No sources configures." << std::endl;
+	}
 
 	if (config.isMember("listener")) {
 	    v = config["listener"];
