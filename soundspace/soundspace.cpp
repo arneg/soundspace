@@ -240,7 +240,9 @@ public:
 	    chunk_size |= chunk_size >> 4;
 	    chunk_size |= chunk_size >> 8;
 	    chunk_size |= chunk_size >> 16;
-	    chunk_size |= chunk_size >> 32;
+	    // poor man's autoconf
+	    if (sizeof(chunk_size) == 8)
+		chunk_size |= chunk_size >> 32;
 	    chunk_size += 1;
 
 	    if (2*chunk_size > (st.st_size - HEADER_SIZE)) {
