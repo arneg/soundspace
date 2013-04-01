@@ -620,6 +620,9 @@ int Buffer::feed_start(Source & source) {
 
 int Buffer::feed_more(Source & source) {
     ALuint num = source.buffers_processed();
+#ifdef TESTING
+    std::cerr << "feeding " << num << " chunks" << std::endl;
+#endif
     while (num--) {
 	if (!left() && source.loop()) reset();
 	if (!feed_one(source, source.unqueue_buffer(), chunk_size)) return 0;
