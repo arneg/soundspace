@@ -801,14 +801,24 @@ public:
     ALCdevice * dev;
     ALCcontext * ctx;
 
-    Device() {
-	dev = alcOpenDevice(NULL);
+    Device(const char * dev_name = NULL) {
+	dev = alcOpenDevice(dev_name);
 	if (!dev) {
-	    throw("foo");
+	    const char * devices = alcGetString(NULL, ALC_DEVICE_SPECIFIER);
+	    size_t len;
+
+	    std::cerr << "available devices:" << std::endl;
+	    while ((len = strlen(devices)) > 0) {
+		std::string name = std::string(devices, len);
+		std::cerr << "\t" << name << std::endl;
+		devices += len;
+	    }
+
+	    throw("Could not open device.");
 	}
 	ctx = alcCreateContext(dev, NULL);
 	if (!ctx) {
-	    throw("bar");
+	    throw("Could not create context.");
 	}
 	alcMakeContextCurrent(ctx);
     }
@@ -1151,6 +1161,12 @@ void setup() {
     }
 
     try {
+	if (!!(v = config["device"]) && v.isString()) {
+	    dev = new Device(v.asCString());
+	} else {
+	    dev = new Device();
+	}
+
 	if (!!(v = config["sources"]) && v.isArray() && (n = v.size()) > 0) {
 	    Json::Value::ArrayIndex i;
 
@@ -1266,9 +1282,6 @@ int main(int argc, char ** argv) {
 #ifdef TESTING
     comm.seperator = '\n';
 #endif
-
-    dev = new Device();
-
     setup();
 
     comm.send_command("ready");
