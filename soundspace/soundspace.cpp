@@ -487,10 +487,14 @@ public:
     bool paused;
 
     void Play() {
+
 	if (paused) {
 	    paused = false;
 	    timer_continue();
-	} else timer_start();
+	} else {
+	    Stop();
+	    timer_start();
+	}
 	alSourcePlay(id);
     }
 
