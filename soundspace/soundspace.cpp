@@ -119,6 +119,10 @@ class Buffer;
 class Source;
 
 class Buffer {
+    struct chunk {
+	char type[4];
+	unsigned int length;
+    };
     struct riff_header {
 	char riff[4];
 	unsigned int length;
@@ -191,6 +195,7 @@ public:
 	    const struct riff_header * rhead;
 	    const struct wave_format * whead;
 	    const struct pcm_header * phead;
+	    const struct chunk * chead;
 	    const char * buf = (const char *) data;
 
 	    if (st.st_size < HEADER_SIZE) {
@@ -201,6 +206,14 @@ public:
 	    buf += sizeof(struct riff_header);
 	    whead = (const struct wave_format*)buf;
 	    buf += sizeof(struct wave_format);
+
+	    chead = (const struct chunk*)buf;
+
+	    while (strncmp(chead->type, "data", 4)) {
+		buf += sizeof(struct chunk) + chead->length;
+		chead = (const struct chunk*)buf;
+	    }
+
 	    phead = (const struct pcm_header*)buf;
 	    buf += sizeof(struct pcm_header);
 
