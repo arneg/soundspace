@@ -500,6 +500,7 @@ public:
     bool paused;
 
     void Play() {
+	if (!buffer) return;
 
 	if (paused) {
 	    paused = false;
@@ -512,6 +513,7 @@ public:
     }
 
     void Stop() {
+	if (!buffer) return;
 	timer_stop();
 	buffer->reset();
 	alSourceStop(id);
@@ -524,6 +526,7 @@ public:
 
     void Rewind() {
 	// TODO: this is certainly broken
+	if (!buffer) return;
 	buffer->reset();
 	alSourceRewind(id);
 	paused = false;
@@ -557,7 +560,7 @@ public:
 	std::cerr << ">> deletint source " << id << std::endl;
 #endif
 	Stop();
-	delete(buffer);
+	if (buffer) delete(buffer);
 	alDeleteSources(1, &id);
 #ifdef TESTING
 	std::cerr << "<< deleted source " << id << std::endl;
@@ -585,7 +588,7 @@ public:
     }
 
     void timer_start() {
-	if (buffer->feed_start(*this))
+	if (buffer && buffer->feed_start(*this))
 	    timer_continue();
     }
 
@@ -598,7 +601,7 @@ public:
 
     void run() {
 	timer_set = false;
-	if (buffer->feed_more(*this)) {
+	if (buffer && buffer->feed_more(*this)) {
 	    timer_continue();
 	}
     }
@@ -1099,8 +1102,8 @@ static const char * conf_names[] = {
 
 Source * sourceFromFile(std::string & file, std::string & name) {
     std::string path = sound_path + file;
-    Source * s = dev->getSource();
     Buffer * buf = new Buffer(path);
+    Source * s = dev->getSource();
     s->add(buf);
     dev->addName(name, s);
     return s;
