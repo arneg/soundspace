@@ -789,17 +789,38 @@ public:
 
 	    a->update();
 	    a->step();
-	}
 
-	l.remove_if(is_done);
+	    if (a->done()) {
+		it = l.erase(it);
+		delete a;
+		continue;
+	    }
+	}
 
 	if (l.size()) {
 	    evtimer_add(&timer_ev, &animation_interval);
 	}
     }
 
+    void removeSource(Source* s) {
+	std::list<Animation*>::iterator it;
+	for (it = l.begin(); it != l.end(); it++) {
+	    Animation * a = * it;
+
+	    if (a->source == s) {
+		it = l.erase(it);
+		delete a;
+		continue;
+	    }
+	}
+    }
+
     void clear() {
 	if (l.size()) {
+	    std::list<Animation*>::iterator it;
+	    for (it = l.begin(); it != l.end(); it++) {
+		delete (*it);
+	    }
 	    evtimer_del(&timer_ev);
 	    l.clear();
 	}
@@ -908,41 +929,47 @@ public:
 	    throw("Bad argument 1 to getSource(). Expected uint or string.");
     }
 
-    void removeSource(Json::Value & ids) {
+    void removeSource(Source * s) {
+	ALuint id = s->id;
+	std::vector<SourceSettings*>::reverse_iterator it2;
+	std::vector<Source*>::reverse_iterator it3;
+
+	for (it2 = snapshot.rbegin(); it2 != snapshot.rend(); it2++) {
+
+	    if ((*it2)->id == id) {
+		delete(*it2);
+		snapshot.erase(--it2.base());
+		break;
+	    }
+	}
+
+	for (it3 = sources.rbegin(); it3 != sources.rend(); it3++) {
+	    if ((*it3)->id == id) {
+		delete(*it3);
+		sources.erase(--it3.base());
+		break;
+	    }
+	}
+
+	std::map<std::string,Source*>::iterator it;
+
+	for (it = name2source.begin(); it != name2source.end(); it++) {
+	    if (it->second == s) {
+		name2source.erase(it);
+		break;
+	    }
+	}
+    }
+
+    void removeSources(Json::Value & ids) {
 	std::vector<Source*> a;
 	Ids2Sources(ids, a);
-	std::vector<Source*>::iterator it1;
+	std::vector<Source*>::iterator it;
 
-	for (it1 = a.begin(); it1 != a.end(); it1++) {
-	    ALuint id = (*it1)->id;
-	    std::vector<SourceSettings*>::reverse_iterator it2;
-	    std::vector<Source*>::reverse_iterator it3;
-
-	    for (it2 = snapshot.rbegin(); it2 != snapshot.rend(); it2++) {
-
-		if ((*it2)->id == id) {
-		    delete(*it2);
-		    snapshot.erase(--it2.base());
-		    break;
-		}
-	    }
-
-	    for (it3 = sources.rbegin(); it3 != sources.rend(); it3++) {
-		if ((*it3)->id == id) {
-		    delete(*it3);
-		    sources.erase(--it3.base());
-		    break;
-		}
-	    }
-
-	    std::map<std::string,Source*>::iterator it;
-
-	    for (it = name2source.begin(); it != name2source.end(); it++) {
-		if (it->second == *it1) {
-		    name2source.erase(it);
-		    break;
-		}
-	    }
+	for (it = a.begin(); it != a.end(); it++) {
+	    Source * s = *it;
+	    animator.removeSource(s);
+	    removeSource(s);
 	}
     }
 
@@ -1253,7 +1280,7 @@ void interpol_callback(Json::Value & root) {
 	    Source * s = sourceFromJSON(root);
 	    if (s) dev->snapshot.push_back(s->copy());
 	} else if (root["cmd"] == "remove_source") {
-	    dev->removeSource(root["ids"]);
+	    dev->removeSources(root["ids"]);
 	} else if (root["cmd"] == "stop_audio") {
 	    dev->Stop(root["ids"]);
 	} else if (root["cmd"] == "reset_audio") {
