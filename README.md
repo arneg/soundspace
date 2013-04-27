@@ -6,6 +6,10 @@
 
   to build and use soundspace the following libraries are required: boost, libevent, jsoncpp and openal.
 
+# building
+
+  make
+
 # copying
 
   this software is release under the AGPL version 3. A copy of the license can be found in the file 'LICENSE'.
