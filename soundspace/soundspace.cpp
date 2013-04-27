@@ -678,6 +678,10 @@ public:
 		+ (now.tv_nsec - start.tv_nsec)*1E-9)/length;
     }
 
+    virtual const char * toString() {
+	return "Animation";
+    }
+
     virtual void step() { }
     virtual bool done() {
 	return p() >= 1.0;
@@ -705,6 +709,10 @@ public:
 	    source->gain(old_gain + (new_gain-old_gain)*t);
 	}
     }
+
+    const char * toString() {
+	return "FadeGain";
+    }
 };
 
 // since positions are multi dimensional, we dont specify the target
@@ -731,6 +739,10 @@ public:
 	t = (r+t)/r;
 	source->position(v[0]*t, v[1]*t, v[2]*t);
 	t0 = p();
+    }
+
+    const char * toString() {
+	return "Scale";
     }
 };
 
@@ -761,6 +773,10 @@ public:
 
 	source->position(v[0]*a + v[2]*b, v[1], v[0]*c + v[2]*d);
 	t0 = p();
+    }
+
+    const char * toString() {
+	return "Rotate";
     }
 };
 
@@ -808,6 +824,7 @@ public:
 	    Animation * a = * it;
 
 	    if (a->source == s) {
+		std::cerr << "removing animation " << a->toString() << std::endl;
 		it = l.erase(it);
 		delete a;
 		continue;
@@ -827,7 +844,14 @@ public:
     }
 
     static void animation_callback(int, short int, void * o) {
-	((Animator*)o)->run();
+	try {
+	    ((Animator*)o)->run();
+	} catch (const char * s) {
+	    std::cerr << "error in animation : '"
+		      << s << "'" << std::endl;
+	} catch (...) {
+	    std::cerr << "unknown error in animation " << std::endl;
+	}
     }
 
     Animator() {
