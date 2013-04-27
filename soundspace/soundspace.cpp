@@ -800,7 +800,7 @@ public:
 
     void run() {
 	std::list<Animation*>::iterator it;
-	for (it = l.begin(); it != l.end(); it++) {
+	for (it = l.begin(); it != l.end();) {
 	    Animation * a = * it;
 
 	    a->update();
@@ -811,6 +811,7 @@ public:
 		delete a;
 		continue;
 	    }
+	    it++;
 	}
 
 	if (l.size()) {
@@ -820,7 +821,7 @@ public:
 
     void removeSource(Source* s) {
 	std::list<Animation*>::iterator it;
-	for (it = l.begin(); it != l.end(); it++) {
+	for (it = l.begin(); it != l.end();) {
 	    Animation * a = * it;
 
 	    if (a->source == s) {
@@ -829,6 +830,7 @@ public:
 		delete a;
 		continue;
 	    }
+	    it++;
 	}
     }
 
