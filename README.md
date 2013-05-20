@@ -1,37 +1,78 @@
-# soundspace
+# Soundspace
   
-  soundspace is a surround sound player which can be controlled using a simple json based protocol.
+  Soundspace is a surround sound player which can be controlled using a simple json based protocol.
   
-# usage
+# Usage
+
+  Soundspace accepts json formatted commands on STDIN.
+  
+# Commands
  
-  add new file as sound source:
+  Add new file as sound source:
   
+    {"cmd":"add_source", "file": "fullpath/filename.wav", "gain":1, "position":[0,0,-1], "loop":true}
  
- 
-  plays all added sounds: 
+  Play all loaded sounds: 
   
-    { "cmd":"play", "ids":true }
+    {"cmd":"play", "ids":true}
     
-
-  rotate sound source during 1 minute with speed of
-
-
+  Plays one sound: 
   
-  fade sound to level:
-  
+    {"cmd":"play", "ids":"fullpath/filename.wav"}
+    
+  Rotate sound source during 1 minute with speed of 0.2
 
-# dependencies
-
-  to build and use soundspace the following libraries are required: boost, libevent, jsoncpp and openal.
+    { "cmd":"rotate", "speed":0.2, "time":60, "ids":true }
   
-  install dependencies on debian/ubuntu:
+  Fade sound out in 5 seconds:
+  
+    {"cmd":"fade","time":5, "gain":0,"ids":"fullpath/filename.wav"}
+  
+  Stop audio:
+    
+    {"cmd":"stop_audio","ids":"fullpath/filename.wav"}
+
+  Remove audio source:
+  
+    {"cmd":"remove_source","ids":"fullpath/filename.wav"}
+
+# Tips
+
+  Three ways to specify target sounds
+  
+  Affect all loaded sounds:
+    
+    ids: true
+      
+  Affect multiple loaded sounds:
+    
+    ids: ["fullpath/filename1.wav","fullpath/filename2.wav","fullpath/filename3.wav"]
+      
+  Affect one loaded sound:
+    
+    ids: "fullpath/filename.wav"
+      
+
+# Installing
+
+  To build and use soundspace the following libraries are required: boost, libevent, jsoncpp and openal.
+  
+  Install dependencies on Debian/Ubuntu:
   
     sudo apt-get install libopenal-dev libboost-dev libevent-dev libjsoncpp-dev
 
-# building
+  Checkout from github and compile:
+    
+    make
+    
+  Install system wide
+  
+    make install
 
-  make
+  Run
+  
+    spacesound
+    
+# License
 
-# copying
-
-  this software is release under the AGPL version 3. A copy of the license can be found in the file 'LICENSE'.
+  This software is release under the AGPL version 3. A copy of the license can be found in the file 'LICENSE'.
