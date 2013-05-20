@@ -663,7 +663,7 @@ int Buffer::feed_one(Source & source, ALuint buffer, size_t len) {
 
     if (left() < len) len = left();
 
-    alBufferData(buffer, format, buf(), len, frequency);
+    CHECK(alBufferData(buffer, format, buf(), len, frequency));
     offset += len;
 
     source.enqueue_buffer(buffer);
