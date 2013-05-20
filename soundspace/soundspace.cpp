@@ -51,7 +51,7 @@ public:
 	msg.append(src);
     }
 
-    const char * what() const throw() { return msg.c_str(); }
+    virtual const char * what() const throw() { return msg.c_str(); }
 
     ~OpenALException() throw() {}
 };
@@ -648,7 +648,7 @@ public:
     static void timer_callback(int, short int, void * o) {
 	try {
 	    ((Source*)o)->run();
-	} catch (std::exception e) {
+	} catch (const std::exception & e) {
 	    std::cerr << "error: " << e.what() << std::endl;
 	} catch (...) {
 	    std::cerr << "some error" << std::endl;
@@ -887,7 +887,7 @@ public:
     static void animation_callback(int, short int, void * o) {
 	try {
 	    ((Animator*)o)->run();
-	} catch (std::exception e) {
+	} catch (const std::exception & e) {
 	    std::cerr << "error in animation : '"
 		      << e.what() << "'" << std::endl;
 	} catch (...) {
@@ -1239,7 +1239,7 @@ void shutdown(int code) {
     comm.send_error("shutdown");
     try {
 	if (dev) delete(dev);
-    } catch (std::exception e) {
+    } catch (const std::exception & e) {
 	std::cerr << "error: " << e.what() << std::endl;
     }
     exit(code);
@@ -1386,7 +1386,7 @@ void interpol_callback(Json::Value & root) {
 	} else if (root["cmd"] == "die_audio") {
 	    shutdown(1, "dying");
 	}
-    } catch (std::exception e) {
+    } catch (const std::exception & e) {
 	std::cerr << "error in " << root["cmd"].asString() << ": '"
 		  << e.what() << "'" << std::endl;
     } catch (const char * s) {
