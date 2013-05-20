@@ -13,6 +13,8 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <cstring>
+#include <stdexcept>
+#include <boost/lexical_cast.hpp>
 
 #include <AL/al.h>
 #include <AL/alc.h>
@@ -22,6 +24,45 @@ void interpol_callback(Json::Value&);
 Interpol comm = Interpol("soundspace", interpol_callback);
 Json::Value config;
 
+static inline const char * err_name(ALenum err) {
+    switch (err) {
+#define CASE(name)  case name : return #name;
+    CASE(AL_INVALID_NAME)
+    CASE(AL_INVALID_ENUM)
+    CASE(AL_INVALID_VALUE)
+    CASE(AL_INVALID_OPERATION)
+    CASE(AL_OUT_OF_MEMORY)
+    CASE(AL_NO_ERROR)
+    }
+    return "UNKNOWN";
+}
+
+class OpenALException : public std::exception {
+    std::string msg;
+public:
+    OpenALException(const char * file, int line, const char * src, const char * al_error) : msg("") {
+	msg.append("Error in '");
+	msg.append(file);
+	msg.append("' at line ");
+	msg += boost::lexical_cast<std::string>(line);
+	msg.append(" using: ");
+	msg.append(al_error);
+    }
+
+    const char * what() const throw() { return msg.c_str(); }
+
+    ~OpenALException() throw() {}
+};
+
+#define CHECK(x)    do {						\
+    x;									\
+    ALenum err = alGetError();						\
+    if (err != AL_NO_ERROR) {						\
+	throw OpenALException(__FILE__, __LINE__, #x, err_name(err));	\
+    }									\
+} while (0)
+
+#undef CASE
 static inline void checkError() {
     ALenum err = alGetError();
     switch (err) {
@@ -157,7 +198,7 @@ public:
     Buffer() {
 	data = NULL;
 	fd = -1;
-	alGenBuffers(NBUFFERS, id);
+	CHECK(alGenBuffers(NBUFFERS, id));
     }
 
     void fromFile(const char * f) {
@@ -269,7 +310,7 @@ public:
 	    std::cerr << "using interval of " << interval << " ms" << std::endl;
 #endif
 	}
-	alGenBuffers(NBUFFERS, id);
+	CHECK(alGenBuffers(NBUFFERS, id));
 #ifdef TESTING
 	std::cerr << "generated " << NBUFFERS << " buffer " << *id << std::endl;
 #endif
@@ -333,33 +374,27 @@ public:
 
 class SourceSettings {
     void get(ALenum pname, ALint & i) {
-	alGetSourcei(id, pname, & i);
-	checkError();
+	CHECK(alGetSourcei(id, pname, & i));
     }
 
     void get(ALenum pname, ALfloat & f) {
-	alGetSourcef(id, pname, & f);
-	checkError();
+	CHECK(alGetSourcef(id, pname, & f));
     }
 
     void get(ALenum pname, ALfloat f[]) {
-	alGetSourcefv(id, pname, f);
-	checkError();
+	CHECK(alGetSourcefv(id, pname, f));
     }
 
     void set(ALenum pname, ALint i) {
-	alSourcei(id, pname, i);
-	checkError();
+	CHECK(alSourcei(id, pname, i));
     }
 
     void set(ALenum pname, ALfloat f) {
-	alSourcef(id, pname, f);
-	checkError();
+	CHECK(alSourcef(id, pname, f));
     }
 
     void set(ALenum pname, ALfloat f[]) {
-	alSourcefv(id, pname, f);
-	checkError();
+	CHECK(alSourcefv(id, pname, f));
     }
 
     void set(ALenum pname, bool b) {
@@ -542,7 +577,7 @@ public:
 	buffer = NULL;
 	paused = false;
 	timer_set = false;
-	alGenSources(1, &id);
+	CHECK(alGenSources(1, &id));
 	evtimer_set(&timer_ev, timer_callback, this);
 #ifdef TESTING
 	std::cerr << "created source " << id << std::endl;
@@ -609,8 +644,8 @@ public:
     static void timer_callback(int, short int, void * o) {
 	try {
 	    ((Source*)o)->run();
-	} catch (const char * s) {
-	    std::cerr << "error: " << s << std::endl;
+	} catch (std::exception e) {
+	    std::cerr << "error: " << e.what() << std::endl;
 	} catch (...) {
 	    std::cerr << "some error" << std::endl;
 	}
@@ -848,9 +883,9 @@ public:
     static void animation_callback(int, short int, void * o) {
 	try {
 	    ((Animator*)o)->run();
-	} catch (const char * s) {
+	} catch (std::exception e) {
 	    std::cerr << "error in animation : '"
-		      << s << "'" << std::endl;
+		      << e.what() << "'" << std::endl;
 	} catch (...) {
 	    std::cerr << "unknown error in animation " << std::endl;
 	}
@@ -1198,8 +1233,8 @@ void shutdown(int code) {
     comm.send_error("shutdown");
     try {
 	if (dev) delete(dev);
-    } catch (const char * s) {
-	std::cerr << "error: " << s << std::endl;
+    } catch (std::exception e) {
+	std::cerr << "error: " << e.what() << std::endl;
     }
     exit(code);
 }
@@ -1343,6 +1378,9 @@ void interpol_callback(Json::Value & root) {
 	} else if (root["cmd"] == "die_audio") {
 	    shutdown(1, "dying");
 	}
+    } catch (std::exception e) {
+	std::cerr << "error in " << root["cmd"].asString() << ": '"
+		  << e.what() << "'" << std::endl;
     } catch (const char * s) {
 	std::cerr << "error in " << root["cmd"].asString() << ": '"
 		  << s << "'" << std::endl;
