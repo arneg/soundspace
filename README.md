@@ -2,6 +2,26 @@
   
   Soundspace is a surround sound player which can be controlled using a simple json based protocol.
   
+# Installing
+
+  To build and use soundspace the following libraries are required: boost, libevent, jsoncpp and openal.
+  
+  Install dependencies on Debian/Ubuntu:
+  
+    sudo apt-get install libopenal-dev libboost-dev libevent-dev libjsoncpp-dev
+
+  Checkout from github and compile:
+    
+    make
+    
+  Install system wide
+  
+    make install
+
+  Run
+  
+    spacesound
+    
 # Usage
 
   Soundspace accepts json formatted commands on STDIN.
@@ -52,27 +72,14 @@
     
     ids: "fullpath/filename.wav"
       
+# Use through http
 
-# Installing
+  To use Spacesound from web tools (HTML5, Canvas, etc) it is possible to forward commands through a simple web server.
+  
+  Run Spacesound as a socket and write with server side script to that socket:
 
-  To build and use soundspace the following libraries are required: boost, libevent, jsoncpp and openal.
+    need a socat or nc command here
   
-  Install dependencies on Debian/Ubuntu:
-  
-    sudo apt-get install libopenal-dev libboost-dev libevent-dev libjsoncpp-dev
-
-  Checkout from github and compile:
-    
-    make
-    
-  Install system wide
-  
-    make install
-
-  Run
-  
-    spacesound
-    
 # License
 
   This software is release under the AGPL version 3. A copy of the license can be found in the file 'LICENSE'.
