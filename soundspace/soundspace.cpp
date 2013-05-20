@@ -41,12 +41,14 @@ class OpenALException : public std::exception {
     std::string msg;
 public:
     OpenALException(const char * file, int line, const char * src, const char * al_error) : msg("") {
-	msg.append("Error in '");
+	msg.append("Error ");
+	msg.append(al_error);
+	msg.append(" in '");
 	msg.append(file);
 	msg.append("' at line ");
 	msg += boost::lexical_cast<std::string>(line);
 	msg.append(" using: ");
-	msg.append(al_error);
+	msg.append(src);
     }
 
     const char * what() const throw() { return msg.c_str(); }
@@ -112,19 +114,19 @@ public:
 	name ## value[0] = v[0];					    \
 	name ## value[1] = v[1];					    \
 	name ## value[2] = v[2];					    \
-	alListenerfv(FLAG, name ## value);				    \
+	CHECK(alListenerfv(FLAG, name ## value));			    \
 	return name ## value;						    \
     }									    \
     ALfloat * name (ALfloat x, ALfloat y, ALfloat z) {			    \
 	name ## value[0] = x;						    \
 	name ## value[1] = y;						    \
 	name ## value[2] = z;						    \
-	alListenerfv(FLAG, name ## value);				    \
+	CHECK(alListenerfv(FLAG, name ## value));			    \
 	return name ## value;						    \
     }									    \
     ALfloat * name (Json::Value & v) {					    \
 	Json2AL(v, name ## value);					    \
-	alListenerfv(FLAG, name ## value);				    \
+	CHECK(alListenerfv(FLAG, name ## value));			    \
 	return name ## value;						    \
     }									    \
     ALfloat * name () {							    \
@@ -144,11 +146,13 @@ public:
     }
 
     Listener() {
+#if 0
 	static const ALfloat default_orientation[] = {
 	    1.0, 0.0, 0.0,
 	    0.0, 1.0, 0.0
 	};
 	orientation(default_orientation);
+#endif
 	position(0.0, 0.0, 0.0);
 	velocity(0.0, 0.0, 0.0);
     }
@@ -365,7 +369,7 @@ public:
 #ifdef TESTING
 	std::cerr << "deleting buffer " << id << " with data " << data << std::endl;
 #endif
-	alDeleteBuffers(NBUFFERS, id);
+	CHECK(alDeleteBuffers(NBUFFERS, id));
 	munmap(data, st.st_size);
 	close(fd);
     }
@@ -544,14 +548,14 @@ public:
 	    Stop();
 	    timer_start();
 	}
-	alSourcePlay(id);
+	CHECK(alSourcePlay(id));
     }
 
     void Stop() {
 	if (!buffer) return;
 	timer_stop();
 	buffer->reset();
-	alSourceStop(id);
+	CHECK(alSourceStop(id));
 	paused = false;
 
 	ALuint num = buffers_processed();
@@ -563,14 +567,14 @@ public:
 	// TODO: this is certainly broken
 	if (!buffer) return;
 	buffer->reset();
-	alSourceRewind(id);
+	CHECK(alSourceRewind(id));
 	paused = false;
     }
 
     void Pause() {
 	paused = true;
 	timer_stop();
-	alSourcePause(id);
+	CHECK(alSourcePause(id));
     }
 
     Source(Device * _dev) : dev(_dev) {
@@ -608,7 +612,7 @@ public:
 
     ALuint unqueue_buffer() {
 	ALuint buf_id;
-	alSourceUnqueueBuffers(id, 1, &buf_id);
+	CHECK(alSourceUnqueueBuffers(id, 1, &buf_id));
 	return buf_id;
     }
 
@@ -901,7 +905,7 @@ public:
     std::vector<Source*> sources;
     std::vector<SourceSettings*> snapshot;
     std::map<std::string,Source*> name2source;
-    Listener l;
+    Listener * l;
     Animator animator;
     ALCdevice * dev;
     ALCcontext * ctx;
@@ -926,6 +930,7 @@ public:
 	    throw("Could not create context.");
 	}
 	alcMakeContextCurrent(ctx);
+	l = new Listener();
     }
 
     void addName(std::string name, Source * s) {
@@ -1164,6 +1169,7 @@ public:
 	for (it2 = sources.begin(); it2 != sources.end(); it2++) {
 	    delete(*it2);
 	}
+	delete(l);
 	alcMakeContextCurrent(NULL);
 	alcDestroyContext(ctx);
 	if (alcCloseDevice(dev) != ALC_TRUE) {
@@ -1262,7 +1268,8 @@ void setup() {
     }
 
     if (cfile.fail()) {
-	shutdown(1, "could not open config file");
+	dev = new Device();
+	goto skip_config;
     }
 
     try {
@@ -1305,14 +1312,15 @@ void setup() {
 	    v = config["listener"];
 	    if (!v.isObject())
 		throw("bad configuration 'listener'. Expected object.");
-	    CONFIG_SET(v, &(dev->l), orientation);
-	    CONFIG_SET(v, &(dev->l), position);
-	    CONFIG_SET(v, &(dev->l), velocity);
+	    CONFIG_SET(v, dev->l, orientation);
+	    CONFIG_SET(v, dev->l, position);
+	    CONFIG_SET(v, dev->l, velocity);
 	} else shutdown(1, "no listener found");
 
     } catch (const char * s) {
 	shutdown(1, s);
     }
+skip_config:
 
     dev->makeSnapshot();
 
