@@ -8,6 +8,9 @@ set(EXTRA_LIBS ${EXTRA_LIBS} interpol json_builder)
 add_subdirectory(libs)
 include_directories(libs)
 
+find_package( Boost 1.40 COMPONENTS program_options REQUIRED )
+include_directories( ${Boost_INCLUDE_DIR} )
+
 find_package(LibEvent REQUIRED)
 include_directories(${LIBEVENT_INCLUDE_DIR})
 
@@ -17,7 +20,8 @@ include_directories(${JSONCPP_INCLUDE_DIR})
 find_package(OpenAL REQUIRED)
 include_directories(${OPENAL_INCLUDE_DIR})
 
-set(EXTRA_LIBS ${EXTRA_LIBS} ${LIBEVENT_LIB} ${JSONCPP_LIB} ${OPENAL_LIBRARY})
+set(EXTRA_LIBS ${EXTRA_LIBS} ${LIBEVENT_LIB} ${JSONCPP_LIB} ${OPENAL_LIBRARY}
+    ${Boost_LIBRARIES})
 
 add_executable(soundspace soundspace.cpp)
 target_link_libraries(soundspace ${EXTRA_LIBS})
