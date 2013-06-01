@@ -12,6 +12,9 @@
 
   Checkout from github and compile:
     
+    mkdir build
+    cd build
+    cmake ../src/
     make
     
   Install system wide
