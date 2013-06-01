@@ -15,9 +15,10 @@
 #include <cstring>
 #include <stdexcept>
 #include <boost/lexical_cast.hpp>
+#include <boost/program_options.hpp>
 
-#include <AL/al.h>
-#include <AL/alc.h>
+#include "al.h"
+#include "alc.h"
 
 void interpol_callback(Json::Value&);
 
@@ -588,7 +589,7 @@ public:
 	SourceSettings * t = new SourceSettings(id);
 	return t;
     }
-    
+
     ~Source() {
 #ifdef TESTING
 	std::cerr << ">> deletint source " << id << std::endl;
@@ -750,7 +751,7 @@ public:
 };
 
 // since positions are multi dimensional, we dont specify the target
-// distance but rather the speed per second. like this we can interleave 
+// distance but rather the speed per second. like this we can interleave
 // animations to create other continuos transformations.
 //
 // this uses linear interpolation, so its important to get the infitisimal
@@ -794,7 +795,7 @@ public:
     }
 
     void step() {
-	// as 
+	// as
 	//  a  0  b
 	//  0  0  0
 	//  c  0  d
@@ -1175,7 +1176,7 @@ public:
 
 Device * dev = NULL;
 
-std::string sound_path, script_path;
+std::string sound_path, script_path, config_path;
 
 static const char * conf_names[] = {
     "../soundspace/soundspace.conf",
@@ -1246,86 +1247,46 @@ void shutdown(int code, const char * s) {
     shutdown(code);
 }
 
-void setup() {
-    std::ifstream cfile;
+void read_config(std::ifstream & cfile) {
     Json::Reader r;
     Json::Value v;
     Json::Value::ArrayIndex n;
-    unsigned int i;
 
-    for (i = 0; i < sizeof(*conf_names); i++) {
-	std::cerr << "trying to open config file '" << conf_names[i] << "'" << std::endl;
-	cfile.open(conf_names[i]);
-	if (!cfile.fail()) {
-	    std::cerr << "opened config file '" << conf_names[i] << "'" << std::endl;
-	    break;
-	}
-    }
+    r.parse(cfile, config, false);
 
-    if (cfile.fail()) {
+    if (!!(v = config["device"]) && v.isString()) {
+	dev = new Device(v.asCString());
+    } else {
 	dev = new Device();
-	goto skip_config;
     }
 
-    try {
-	r.parse(cfile, config, false);
-    } catch(...) {
-	shutdown(1, "error while parsing configuration 'soundspace.config'");
-    }
+    if (!!(v = config["sources"]) && v.isArray() && (n = v.size()) > 0) {
+	Json::Value::ArrayIndex i;
 
-    try {
-	if (!!(v = config["device"]) && v.isString()) {
-	    dev = new Device(v.asCString());
-	} else {
-	    dev = new Device();
+	std::cerr << "found " << n << " sources" << std::endl;
+
+	if (config.isMember("path")) {
+	    sound_path = config["path"].asString();
 	}
 
-	if (!!(v = config["sources"]) && v.isArray() && (n = v.size()) > 0) {
-	    Json::Value::ArrayIndex i;
-
-	    std::cerr << "found " << n << " sources" << std::endl;
-
-	    if (config.isMember("path")) {
-		sound_path = config["path"].asString();
-		sound_path.append("/");
-	    }
-
-	    if (config.isMember("script_path")) {
-		script_path = config["script_path"].asString();
-		script_path.append("/");
-	    }
-
-	    for (i = 0; i < n; i++) {
-		Json::Value sinfo = v[i];
-		sourceFromJSON(sinfo);
-	    }
-	} else {
-	    std::cerr << "No sources configures." << std::endl;
+	if (config.isMember("script_path")) {
+	    script_path = config["script_path"].asString();
 	}
 
-	if (config.isMember("listener")) {
-	    v = config["listener"];
-	    if (!v.isObject())
-		throw("bad configuration 'listener'. Expected object.");
-	    CONFIG_SET(v, dev->l, orientation);
-	    CONFIG_SET(v, dev->l, position);
-	    CONFIG_SET(v, dev->l, velocity);
-	} else shutdown(1, "no listener found");
-
-    } catch (const char * s) {
-	shutdown(1, s);
+	for (i = 0; i < n; i++) {
+	    Json::Value sinfo = v[i];
+	    sourceFromJSON(sinfo);
+	}
     }
-skip_config:
 
-    dev->makeSnapshot();
-
-#if 0//def TESTING
-    for (size_t i = 0; i < n; i++) {
-	std::cerr << "testing source " << i << std::endl;
-	dev->sources[i]->Play();
-	sleep(1);
+    if (config.isMember("listener")) {
+	v = config["listener"];
+	if (!v.isObject())
+	    throw("bad configuration 'listener'. Expected object.");
+	CONFIG_SET(v, dev->l, orientation);
+	CONFIG_SET(v, dev->l, position);
+	CONFIG_SET(v, dev->l, velocity);
     }
-#endif
 }
 
 void interpol_callback(Json::Value & root) {
@@ -1357,9 +1318,9 @@ void interpol_callback(Json::Value & root) {
 	} else if (root["cmd"] == "rewind") {
 	    dev->Rewind(root["ids"]);
 	} else if (root["cmd"] == "position") {
-	    if (root.isMember("ids")) 
+	    if (root.isMember("ids"))
 		dev->position(root["ids"], root["position"]);
-	    else 
+	    else
 		dev->getSource(root["id"])->position(root["position"]);
 	} else if (root["cmd"] == "gain") {
 	    if (root.isMember("ids"))
@@ -1392,21 +1353,65 @@ void interpol_callback(Json::Value & root) {
     }
 }
 
+namespace po = boost::program_options;
+
 int main(int argc, char ** argv) {
     struct event ev;
+    po::options_description desc("Available options");
+    po::variables_map vm;
+    std::ifstream cfile;
+    std::vector<std::string> exec;
+
+    desc.add_options()
+	("help,h", "print usage info")
+	("config,c", po::value<std::string>(), "path to config file")
+	("sound-path,s", po::value<std::string>(&sound_path)->default_value("./"), "sound file search path")
+	("script-path", po::value<std::string>(&script_path)->default_value("./"), "script search path")
+	("exec,e", po::value< std::vector<std::string> >(&exec), "execute a given script on startup")
+	;
+
+    po::store(po::parse_command_line(argc, argv, desc), vm);
+    po::notify(vm);
+
+    if (vm.count("help")) {
+	std::cout << desc << std::endl;
+	return 1;
+    }
+
+    if (vm.count("config")) {
+	cfile.open(vm["config"].as<const char *>());
+
+	if (!cfile.fail()) {
+	    read_config(cfile);
+	    cfile.close();
+	}
+    }
+
+    if (script_path[script_path.length()] != '/')
+	script_path.append("/");
+
+    if (sound_path[sound_path.length()] != '/')
+	sound_path.append("/");
+
+    if (!dev) dev = new Device();
+
+    dev->makeSnapshot();
 
     event_init();
 #ifdef TESTING
     comm.seperator = '\n';
 #endif
-    setup();
-
     comm.send_command("ready");
 
     signal(SIGINT, shutdown);
 
-    if (argc > 1) {
-	comm.eval(argv[1]);
+    if (vm.count("exec")) {
+	std::vector<std::string>::iterator it = exec.begin();
+
+	for (; it != exec.end(); it++) {
+	    std::cerr << "executing: " << *it << std::endl;
+	    comm.eval(*it);
+	}
     }
 
     event_set(&ev, 0, EV_READ | EV_PERSIST, comm.read_cb, &comm);
