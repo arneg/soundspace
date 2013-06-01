@@ -38,6 +38,21 @@ static inline const char * err_name(ALenum err) {
     return "UNKNOWN";
 }
 
+class RiffException : public std::exception {
+    std::string msg;
+public:
+    RiffException(const char * file, const char * s) {
+	msg.append(s);
+	msg.append(" '");
+	msg.append(file);
+	msg.append("'");
+    }
+
+    virtual const char * what() const throw() { return msg.c_str(); }
+
+    ~RiffException() throw() {}
+};
+
 class OpenALException : public std::exception {
     std::string msg;
 public:
@@ -66,42 +81,27 @@ public:
 } while (0)
 
 #undef CASE
-static inline void checkError() {
-    ALenum err = alGetError();
-    switch (err) {
-#define CASE(name)  case name : throw("Got error " #name );
-    CASE(AL_INVALID_NAME)
-    CASE(AL_INVALID_ENUM)
-    CASE(AL_INVALID_VALUE)
-    CASE(AL_INVALID_OPERATION)
-    CASE(AL_OUT_OF_MEMORY)
-    case AL_NO_ERROR:
-	return;
-    }
-}
 
-
-static inline void Json2AL(Json::Value & v, ALfloat a[],
-			   const unsigned int n = 3) {
-    if (!v.isArray()) throw("Bad argument 1 to Json2fv. Expected Array.");
+static inline void Json2AL(Json::Value & v, ALfloat a[], unsigned int n = 3) {
+    if (!v.isArray()) throw std::logic_error("Bad argument 1 to Json2fv. Expected Array.");
     for (unsigned int i = 0; i < n; i++) {
-	if (!v[i].isNumeric()) throw("Bad element in vector. Expected numeric");
+	if (!v[i].isNumeric()) throw std::logic_error("Bad element in vector. Expected numeric");
 	a[i] = (ALfloat)v[i].asDouble();
     }
 }
 
 static inline void Json2AL(Json::Value & v, ALfloat & f) {
-    if (!v.isNumeric()) throw("Bad argument 1 to Json2f. Expected numeric");
+    if (!v.isNumeric()) throw std::logic_error("Bad argument 1 to Json2f. Expected numeric");
     f = (ALfloat)v.asDouble();
 }
 
 static inline void Json2AL(Json::Value & v, ALint & i) {
-    if (!v.isNumeric()) throw("Bad argument 1 to Json2f. Expected numeric");
+    if (!v.isNumeric()) throw std::logic_error("Bad argument 1 to Json2f. Expected numeric");
     i = (ALint)v.asInt();
 }
 
 static inline void Json2AL(Json::Value & v, bool & b) {
-    if (!v.isBool()) throw("Bad argument 1 to Json2f. Expected true or false");
+    if (!v.isBool()) throw std::logic_error("Bad argument 1 to Json2f. Expected true or false");
     b = (ALfloat)v.asBool();
 }
 
@@ -212,13 +212,13 @@ public:
 	fd = open(f, O_RDONLY);
 
 	if (fd == -1)
-	    throw("could not open file");
+	    throw RiffException(f, "could not open file");
 
 	if (fstat(fd, &st) == -1)
-	    throw("could not stat file");
+	    throw RiffException(f, "could not stat file");
 
 	if (!S_ISREG (st.st_mode))
-	    throw("not a regular file");
+	    throw RiffException(f, "not a regular file");
 
 #ifdef TESTING
 	std::cerr << "open file " << f << " with size " << st.st_size << std::endl;
@@ -232,7 +232,7 @@ public:
 
 	if (data == MAP_FAILED) {
 	    close(fd);
-	    throw("mmap failed");
+	    throw RiffException(f, "could not mmap ");
 	}
 
 	madvise(data, st.st_size, MADV_SEQUENTIAL);
@@ -245,7 +245,7 @@ public:
 	    const char * buf = (const char *) data;
 
 	    if (st.st_size < HEADER_SIZE) {
-		throw("muha");
+		throw RiffException(f, "file smaller than wave header ");
 	    }
 
 	    rhead = (const struct riff_header*)buf;
@@ -264,14 +264,14 @@ public:
 	    buf += sizeof(struct pcm_header);
 
 	    if (strncmp(rhead->riff, "RIFF", 4) || strncmp(rhead->wave, "WAVE", 4)) {
-		throw("bad riff wave header");
+		throw RiffException(f, "bad riff wave header in");
 	    }
 
 	    if (rhead->length + 8 != st.st_size)
-		throw("someone is lying about the size of this wave");
+		throw RiffException(f, "corrupt header in ");
 
 	    if (strncmp(whead->fmt, "fmt ", 4) || whead->len != 16)
-		throw("bad wave format");
+		throw RiffException(f, "bad wave format in");
 
 #ifdef TESTING
 	    std::cerr << "bits: " << whead->bits_per_sample
@@ -283,12 +283,12 @@ public:
 		std::cerr << "Warning: '" << f << "' contains stereo data and"
 			     " will be played without spatialization." << std::endl;
 		format = (whead->bits_per_sample == 8) ? AL_FORMAT_STEREO8 : AL_FORMAT_STEREO16;
-	    } else throw("bad number of channels");
+	    } else throw RiffException(f, "bad number of channels in");
 
 	    frequency = (ALuint)whead->sample_rate;
 
 	    if (strncmp(phead->data, "data", 4))
-		throw("bad pcm header");
+		throw RiffException(f, "bad pcm header in ");
 
 	    offset = HEADER_SIZE;
 	    chunk_size = whead->bytes_per_second / 1000 * BUFFER_INTERVAL;
@@ -342,7 +342,7 @@ public:
 
     Buffer(Json::Value & s) {
 	if (!s.isString())
-	    throw("Bad argument one to Buffer(). Expected string.");
+	    throw std::logic_error("Bad argument one to Buffer(). Expected string.");
 	fromFile(s.asCString());
     }
 
@@ -646,8 +646,6 @@ public:
 	    ((Source*)o)->run();
 	} catch (const std::exception & e) {
 	    std::cerr << "error: " << e.what() << std::endl;
-	} catch (...) {
-	    std::cerr << "some error" << std::endl;
 	}
     }
 
@@ -886,8 +884,6 @@ public:
 	} catch (const std::exception & e) {
 	    std::cerr << "error in animation : '"
 		      << e.what() << "'" << std::endl;
-	} catch (...) {
-	    std::cerr << "unknown error in animation " << std::endl;
 	}
     }
 
@@ -919,11 +915,11 @@ public:
 		devices += len;
 	    }
 
-	    throw("Could not open device.");
+	    throw std::logic_error("Could not open device.");
 	}
 	ctx = alcCreateContext(dev, NULL);
 	if (!ctx) {
-	    throw("Could not create context.");
+	    throw std::logic_error("Could not create context.");
 	}
 	alcMakeContextCurrent(ctx);
 	l = new Listener();
@@ -956,7 +952,7 @@ public:
     void applySnapshot() {
 	size_t i;
 	if (sources.size() != snapshot.size()) {
-	    throw("mismatching snapshot");
+	    throw std::logic_error("mismatching snapshot");
 	}
 	for (i = 0; i < snapshot.size(); i++) {
 	    snapshot[i]->apply();
@@ -977,7 +973,7 @@ public:
     Source * getSource(const std::string & s) {
 	std::map<std::string,Source*>::iterator it = name2source.find(s);
 	if (it == name2source.end())
-	    throw("Could not find source by name.");
+	    throw std::logic_error("Could not find source by name.");
 	return it->second;
     }
 
@@ -988,7 +984,7 @@ public:
 	    const std::string s = v.asString();
 	    return getSource(s);
 	} else
-	    throw("Bad argument 1 to getSource(). Expected uint or string.");
+	    throw std::logic_error("Bad argument 1 to getSource(). Expected uint or string.");
     }
 
     void removeSource(Source * s) {
@@ -1037,7 +1033,7 @@ public:
 
     void checkSource(size_t id) throw(const char *) {
 	if (id > sources.size())
-	    throw("Source ID is out of range.");
+	    throw std::logic_error("Source ID is out of range.");
     }
 
     inline void Json2Ids(Json::Value & ids, std::vector<ALuint> & a) {
@@ -1053,7 +1049,7 @@ public:
 		for (i = 0; i < sources.size(); i++) {
 		    a.push_back(sources[i]->id);
 		}
-	    } else throw("bad argument one to Json2Ids. Expected string|int|array|true");
+	    } else throw std::logic_error("bad argument one to Json2Ids. Expected string|int|array|true");
 	} else a.push_back(getSource(ids)->id);
     }
 
@@ -1068,7 +1064,7 @@ public:
 	    bool t = ids.asBool();
 	    if (t) {
 		a = sources;
-	    } else throw("bad argument one to Json2Ids. Expected string|int|array|true");
+	    } else throw std::logic_error("bad argument one to Json2Ids. Expected string|int|array|true");
 	} else a.push_back(getSource(ids));
     }
 
@@ -1282,7 +1278,7 @@ void read_config(std::ifstream & cfile) {
     if (config.isMember("listener")) {
 	v = config["listener"];
 	if (!v.isObject())
-	    throw("bad configuration 'listener'. Expected object.");
+	    throw std::logic_error("bad configuration 'listener'. Expected object.");
 	CONFIG_SET(v, dev->l, orientation);
 	CONFIG_SET(v, dev->l, position);
 	CONFIG_SET(v, dev->l, velocity);
@@ -1295,7 +1291,7 @@ void interpol_callback(Json::Value & root) {
 	    dev->Play(root["ids"]);
 	} else if (root["cmd"] == "eval") {
 	    if (!root["script"].isString()) {
-		throw("bad script file. expected string.");
+		throw std::logic_error("bad script file. expected string.");
 	    }
 	    std::string file = script_path;
 	    std::cerr << "script_path: " << script_path << std::endl;
@@ -1345,11 +1341,6 @@ void interpol_callback(Json::Value & root) {
     } catch (const std::exception & e) {
 	std::cerr << "error in " << root["cmd"].asString() << ": '"
 		  << e.what() << "'" << std::endl;
-    } catch (const char * s) {
-	std::cerr << "error in " << root["cmd"].asString() << ": '"
-		  << s << "'" << std::endl;
-    } catch (...) {
-	std::cerr << "unknown error in " << root["cmd"].asString() << std::endl;
     }
 }
 
@@ -1361,10 +1352,11 @@ int main(int argc, char ** argv) {
     po::variables_map vm;
     std::ifstream cfile;
     std::vector<std::string> exec;
+    std::string config_file;
 
     desc.add_options()
 	("help,h", "print usage info")
-	("config,c", po::value<std::string>(), "path to config file")
+	("config,c", po::value<std::string>(&config_file), "path to config file")
 	("sound-path,s", po::value<std::string>(&sound_path)->default_value("./"), "sound file search path")
 	("script-path", po::value<std::string>(&script_path)->default_value("./"), "script search path")
 	("exec,e", po::value< std::vector<std::string> >(&exec), "execute a given script on startup")
@@ -1379,10 +1371,15 @@ int main(int argc, char ** argv) {
     }
 
     if (vm.count("config")) {
-	cfile.open(vm["config"].as<const char *>());
+	cfile.open(config_file.c_str());
 
 	if (!cfile.fail()) {
-	    read_config(cfile);
+	    try {
+		read_config(cfile);
+	    } catch (const std::exception & err) {
+		std::cerr << "parsing config file '" << config_file << "' failed: "
+			  << err.what() << std::endl;
+	    }
 	    cfile.close();
 	}
     }
