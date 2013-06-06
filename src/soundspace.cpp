@@ -12,6 +12,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <unistd.h>
 #include <cstring>
 #include <stdexcept>
 #include <boost/lexical_cast.hpp>
@@ -56,9 +57,9 @@ public:
 class OpenALException : public std::exception {
     std::string msg;
 public:
-    OpenALException(const char * file, int line, const char * src, const char * al_error) : msg("") {
+    OpenALException(const char * file, int line, const char * src, ALenum al_error) : msg("") {
 	msg.append("Error ");
-	msg.append(al_error);
+	msg.append(err_name(al_error));
 	msg.append(" in '");
 	msg.append(file);
 	msg.append("' at line ");
@@ -76,7 +77,7 @@ public:
     x;									\
     ALenum err = alGetError();						\
     if (err != AL_NO_ERROR) {						\
-	throw OpenALException(__FILE__, __LINE__, #x, err_name(err));	\
+	throw OpenALException(__FILE__, __LINE__, #x, err);		\
     }									\
 } while (0)
 
@@ -220,13 +221,13 @@ public:
 	if (!S_ISREG (st.st_mode))
 	    throw RiffException(f, "not a regular file");
 
-#ifdef TESTING
+#ifdef DEBUG
 	std::cerr << "open file " << f << " with size " << st.st_size << std::endl;
 #endif
 
 	data = mmap(0, st.st_size, PROT_READ, MAP_SHARED, fd, 0);
 
-#ifdef TESTING
+#ifdef DEBUG
 	std::cerr << "mapped " << f << " to " << data << std::endl;
 #endif
 
@@ -273,7 +274,7 @@ public:
 	    if (strncmp(whead->fmt, "fmt ", 4) || whead->len != 16)
 		throw RiffException(f, "bad wave format in");
 
-#ifdef TESTING
+#ifdef DEBUG
 	    std::cerr << "bits: " << whead->bits_per_sample
 		      << ", channels: " << whead->channels << std::endl;
 #endif
@@ -305,13 +306,13 @@ public:
 		chunk_size += 256;
 	    }
 
-#ifdef TESTING
+#ifdef DEBUG
 	    std::cerr << "buffering chunks of " << chunk_size << " bytes" << std::endl;
 	    std::cerr << "using interval of " << interval << " ms" << std::endl;
 #endif
 	}
 	CHECK(alGenBuffers(NBUFFERS, id));
-#ifdef TESTING
+#ifdef DEBUG
 	std::cerr << "generated " << NBUFFERS << " buffer " << *id << std::endl;
 #endif
     }
@@ -362,7 +363,7 @@ public:
     */
 
     ~Buffer() {
-#ifdef TESTING
+#ifdef DEBUG
 	std::cerr << "deleting buffer " << id << " with data " << data << std::endl;
 #endif
 	CHECK(alDeleteBuffers(NBUFFERS, id));
@@ -469,13 +470,13 @@ public:
     SourceSettings() {}
     SourceSettings(ALuint _id) : id(_id) {
 	update();
-#ifdef TESTING
+#ifdef DEBUG
 	std::cerr << "copied source " << id << std::endl;
 #endif
     }
 
     ~SourceSettings() {
-#ifdef TESTING
+#ifdef DEBUG
 	std::cerr << "deleted copied source " << id << std::endl;
 #endif
     }
@@ -579,7 +580,7 @@ public:
 	timer_set = false;
 	CHECK(alGenSources(1, &id));
 	evtimer_set(&timer_ev, timer_callback, this);
-#ifdef TESTING
+#ifdef DEBUG
 	std::cerr << "created source " << id << std::endl;
 #endif
 	update();
@@ -591,13 +592,13 @@ public:
     }
 
     ~Source() {
-#ifdef TESTING
+#ifdef DEBUG
 	std::cerr << ">> deletint source " << id << std::endl;
 #endif
 	Stop();
 	if (buffer) delete(buffer);
 	alDeleteSources(1, &id);
-#ifdef TESTING
+#ifdef DEBUG
 	std::cerr << "<< deleted source " << id << std::endl;
 #endif
     }
@@ -673,7 +674,7 @@ int Buffer::feed_start(Source & source) {
 
 int Buffer::feed_more(Source & source) {
     ALuint num = source.buffers_processed();
-#ifdef TESTING
+#ifdef DEBUG
     std::cerr << "feeding " << num << " chunks" << std::endl;
 #endif
     while (num--) {
@@ -727,7 +728,7 @@ public:
     FadeGain(Source * s, double l, ALfloat _gain) : Animation(s, l) {
 	old_gain = s->gain();
 	new_gain = _gain;
-#if TESTING
+#if DEBUG
 	std::cerr << "animating between " << old_gain << " and " << new_gain
 		  << std::endl;
 #endif
@@ -1174,18 +1175,6 @@ Device * dev = NULL;
 
 std::string sound_path, script_path, config_path;
 
-static const char * conf_names[] = {
-    "../soundspace/soundspace.conf",
-    "../immigration/soundspace.conf",
-    "../soundspace/soundspace.config",
-    "../immigration/soundspace.config",
-    "soundspace.conf",
-    "soundspace.config",
-    "soundspace.conf.sample",
-    "/opt/memopol/immigration/soundspace.conf"
-};
-
-
 Source * sourceFromFile(std::string & file, std::string & name) {
     std::string path = sound_path + file;
     Buffer * buf = new Buffer(path);
@@ -1232,7 +1221,7 @@ void shutdown(int code) {
     try {
 	if (dev) delete(dev);
     } catch (const std::exception & e) {
-	std::cerr << "error: " << e.what() << std::endl;
+	std::cerr << "error on shutdown: " << e.what() << std::endl;
     }
     exit(code);
 }
@@ -1360,6 +1349,7 @@ int main(int argc, char ** argv) {
 	("sound-path,s", po::value<std::string>(&sound_path)->default_value("./"), "sound file search path")
 	("script-path", po::value<std::string>(&script_path)->default_value("./"), "script search path")
 	("exec,e", po::value< std::vector<std::string> >(&exec), "execute a given script on startup")
+	("stdin", "Use '\\n' instead of '\\0' as message delimiter.")
 	;
 
     po::store(po::parse_command_line(argc, argv, desc), vm);
@@ -1384,6 +1374,10 @@ int main(int argc, char ** argv) {
 	}
     }
 
+    if (vm.count("stdin")) {
+	comm.seperator = '\n';
+    }
+
     if (script_path[script_path.length()] != '/')
 	script_path.append("/");
 
@@ -1395,9 +1389,7 @@ int main(int argc, char ** argv) {
     dev->makeSnapshot();
 
     event_init();
-#ifdef TESTING
-    comm.seperator = '\n';
-#endif
+
     comm.send_command("ready");
 
     signal(SIGINT, shutdown);
