@@ -1360,6 +1360,8 @@ int main(int argc, char ** argv) {
 	return 1;
     }
 
+    event_init();
+
     if (vm.count("config")) {
 	cfile.open(config_file.c_str());
 
@@ -1387,8 +1389,6 @@ int main(int argc, char ** argv) {
     if (!dev) dev = new Device();
 
     dev->makeSnapshot();
-
-    event_init();
 
     comm.send_command("ready");
 
