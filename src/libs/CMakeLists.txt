@@ -8,3 +8,7 @@ set(CMAKE_REQUIRED_LIBRARIES "${JSONCPP_LIB}")
 
 add_library(json_builder json_builder.cpp)
 add_library(interpol interpol.cpp)
+
+install(TARGETS json_builder DESTINATION lib)
+install(TARGETS interpol DESTINATION lib)
+install(FILES interpol.h json_builder.h DESTINATION include)
