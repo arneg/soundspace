@@ -1362,6 +1362,12 @@ int main(int argc, char ** argv) {
 
     event_init();
 
+    if (script_path[script_path.length()] != '/')
+	script_path.append("/");
+
+    if (sound_path[sound_path.length()] != '/')
+	sound_path.append("/");
+
     if (vm.count("config")) {
 	cfile.open(config_file.c_str());
 
@@ -1379,12 +1385,6 @@ int main(int argc, char ** argv) {
     if (vm.count("stdin")) {
 	comm.seperator = '\n';
     }
-
-    if (script_path[script_path.length()] != '/')
-	script_path.append("/");
-
-    if (sound_path[sound_path.length()] != '/')
-	sound_path.append("/");
 
     if (!dev) dev = new Device();
 
