@@ -35,6 +35,14 @@ static inline const char * err_name(ALenum err) {
     CASE(AL_INVALID_OPERATION)
     CASE(AL_OUT_OF_MEMORY)
     CASE(AL_NO_ERROR)
+    CASE(AL_PLAYING)
+    CASE(AL_PAUSED)
+    CASE(AL_STOPPED)
+    CASE(AL_INITIAL)
+    CASE(AL_FORMAT_MONO8)
+    CASE(AL_FORMAT_MONO16)
+    CASE(AL_FORMAT_STEREO8)
+    CASE(AL_FORMAT_STEREO16)
     }
     return "UNKNOWN";
 }
@@ -548,6 +556,13 @@ public:
 	CHECK(alSourcePlay(id));
     }
 
+
+    ALenum State() {
+	ALenum state;
+	CHECK(alGetSourcei(id, AL_SOURCE_STATE, &state));
+	return state;
+    }
+
     void Stop() {
 	if (!buffer) return;
 	timer_stop();
@@ -604,7 +619,7 @@ public:
     }
 
     void enqueue_buffer(ALuint buf_id) {
-	alSourceQueueBuffers(id, 1, &buf_id);
+	CHECK(alSourceQueueBuffers(id, 1, &buf_id));
     }
 
     ALuint unqueue_buffer() {
