@@ -114,7 +114,7 @@ static inline void Json2AL(Json::Value & v, bool & b) {
     b = (ALfloat)v.asBool();
 }
 
-const int NBUFFERS = 2;
+const int NBUFFERS = 3;
 const int BUFFER_INTERVAL = 1000;
 
 class Listener {
@@ -682,9 +682,16 @@ int Buffer::feed_one(Source & source, ALuint buffer, size_t len) {
 }
 
 int Buffer::feed_start(Source & source) {
-    feed_one(source, id[0], chunk_size);
-    if (!left() && source.loop()) reset();
-    return feed_one(source, id[1], chunk_size);
+    ALuint i;
+
+    for (i = 0; i < NBUFFERS; i++) {
+	if (!left()) { 
+	    if (source.loop()) reset();
+	    else return 0;
+	}
+	feed_one(source, id[i], chunk_size);
+    }
+    return 1;
 }
 
 int Buffer::feed_more(Source & source) {
@@ -695,6 +702,11 @@ int Buffer::feed_more(Source & source) {
     while (num--) {
 	if (!left() && source.loop()) reset();
 	if (!feed_one(source, source.unqueue_buffer(), chunk_size)) return 0;
+    }
+
+    if (source.State() != AL_PLAYING) {
+	std::cerr << "Buffer underrun." << std::endl;
+	source.Play();
     }
 
     return 1;
@@ -1154,7 +1166,7 @@ public:
     void PauseAll() {
 	paused.clear();
 	for (size_t i = 0; i < sources.size(); i++) {
-	    if (sources[i]->state() == AL_PLAYING) {
+	    if (sources[i]->State() == AL_PLAYING) {
 		paused.push_back(sources[i]->id);
 	    }
 	}
