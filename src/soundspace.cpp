@@ -329,7 +329,7 @@ public:
 	return (char*)data + offset;
     }
 
-    const size_t left() {
+    size_t left() {
 	return st.st_size - offset;
     }
 
@@ -593,6 +593,7 @@ public:
 	buffer = NULL;
 	paused = false;
 	timer_set = false;
+	loop(false);
 	CHECK(alGenSources(1, &id));
 	evtimer_set(&timer_ev, timer_callback, this);
 #ifdef DEBUG
@@ -700,6 +701,9 @@ int Buffer::feed_more(Source & source) {
     std::cerr << "feeding " << num << " chunks" << std::endl;
 #endif
     while (num--) {
+#ifdef DEBUG
+	std::cerr << "source.loop(): " << source.loop() << std::endl;
+#endif
 	if (!left() && source.loop()) reset();
 	if (!feed_one(source, source.unqueue_buffer(), chunk_size)) return 0;
     }
