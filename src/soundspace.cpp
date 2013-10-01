@@ -513,7 +513,6 @@ class Source : public SourceSettings {
 public:
     Buffer * buffer;
     Device * dev;
-    bool is_copy;
 
     bool _loop;
     bool loop() {
