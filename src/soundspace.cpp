@@ -1068,16 +1068,16 @@ public:
     }
 
     inline void Json2Ids(Json::Value & ids, std::vector<ALuint> & a) {
-	size_t n, i;
+        Json::ArrayIndex n;
 	if (ids.isArray() && (n = ids.size())) {
 	    a.reserve((size_t)n);
-	    for (i = 0; i < n; i++) {
+	    for (Json::ArrayIndex i = 0; i < n; i++) {
 		a.push_back(getSource(ids[i])->id);
 	    }
 	} else if (ids.isBool()) {
 	    bool t = ids.asBool();
 	    if (t) {
-		for (i = 0; i < sources.size(); i++) {
+		for (size_t i = 0; i < sources.size(); i++) {
 		    a.push_back(sources[i]->id);
 		}
 	    } else throw std::logic_error("bad argument one to Json2Ids. Expected string|int|array|true");
@@ -1085,10 +1085,10 @@ public:
     }
 
     inline void Ids2Sources(Json::Value & ids, std::vector<Source*> & a) {
-	size_t n, i;
+        Json::ArrayIndex n;
 	if (ids.isArray() && (n = ids.size())) {
 	    a.reserve((size_t)n);
-	    for (i = 0; i < n; i++) {
+	    for (Json::ArrayIndex i = 0; i < n; i++) {
 		a.push_back(getSource(ids[i]));
 	    }
 	} else if (ids.isBool()) {
