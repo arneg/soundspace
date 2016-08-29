@@ -8,7 +8,7 @@
   
   Install dependencies on Debian/Ubuntu:
   
-    sudo apt-get install libopenal-dev libboost-dev libevent-dev libjsoncpp-dev
+    sudo apt-get install libopenal-dev libboost-dev libevent-dev libjsoncpp-dev libboost-program-options-dev
 
   Checkout from github and compile:
     
