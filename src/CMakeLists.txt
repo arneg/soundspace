@@ -1,6 +1,8 @@
 cmake_minimum_required (VERSION 2.6)
 project (soundspace)
 
+set (CMAKE_CXX_STANDARD 11)
+
 set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/CMake" ${CMAKE_MODULE_PATH})
 
 include_directories("${PROJECT_SOURCE_DIR}/libs")
